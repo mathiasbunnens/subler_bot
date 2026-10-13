@@ -1,0 +1,19 @@
+# Swift / Xcode build products
+.build/
+.swiftpm/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# Packaged application outputs
+dist/
+dist-update/
+
+# Local files and secrets
+.DS_Store
+.env
+.env.*
+*.pem
+*.key
+__pycache__/
+*.pyc

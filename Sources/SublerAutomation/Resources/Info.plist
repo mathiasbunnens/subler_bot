@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>Subler Automation</string>
+<key>CFBundleDisplayName</key><string>Subler Automation</string>
+<key>CFBundleIdentifier</key><string>com.mathiasbunnens.SublerAutomation</string>
+<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleExecutable</key><string>SublerAutomation</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+<key>LSUIElement</key><true/>
+<key>NSHighResolutionCapable</key><true/>
+<key>NSAppleEventsUsageDescription</key><string>Subler Automation contrôle Subler pour importer vos MKV, appliquer les métadonnées et convertir les films en MP4.</string>
+<key>NSMoviesFolderUsageDescription</key><string>Accès aux films à convertir et aux MP4 temporaires.</string>
+<key>NSNetworkVolumesUsageDescription</key><string>Transfert des MP4 vérifiés vers votre partage SMB Movies.</string>
+</dict></plist>
