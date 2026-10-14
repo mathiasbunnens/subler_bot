@@ -51,6 +51,10 @@ struct AppSettings: Codable, Equatable {
             if let testRoot = ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] {
                 defaults.sourcePath = testRoot + "/Source"; defaults.temporaryPath = testRoot + "/Temp"
                 defaults.notifications = false
+            } else {
+                // First installation: ~/Movies/Subler Automation/{À convertir,Temp} are created
+                // at startup; the server comes from an already mounted share when there is one.
+                defaults.smb = SMBConfiguration.firstLaunchDefault()
             }
             return defaults
         }

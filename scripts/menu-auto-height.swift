@@ -15,6 +15,8 @@ final class FakeMenuBarExtraWindow: NSWindow {}
         let root = URL(fileURLWithPath: ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"]!)
         precondition(root.path.hasPrefix(NSHomeDirectory() + "/.hermes/cache/scratch/"))
         var settings = AppSettings()
+        // Layout fixtures model a configured server (no "Serveur non configuré" card).
+        settings.smb = SMBConfiguration(serverURL: "smb://fixture.invalid/Movies", username: "fixture", expectedMountPath: "/Volumes/Fixture")
         settings.sourcePath = root.appendingPathComponent("Source").path
         settings.temporaryPath = root.appendingPathComponent("Temp").path
         settings.watchFolder = false; settings.notifications = false; settings.paused = true

@@ -109,9 +109,16 @@ final class JobQueueService: ObservableObject {
     func applySettings(_ draft: AppSettings) {
         guard !fatalPersistenceError else { return }
         do {
-            guard let url = URL(string: draft.smb.serverURL), url.scheme == "smb", url.host != nil,
-                  url.password == nil, url.user == nil, url.path.split(separator: "/").count == 1 else {
-                throw UserFacingError("Adresse SMB attendue : smb://serveur/partage, sans identifiants intégrés.")
+            if !draft.smb.isConfigured {
+                // Allowed: films are converted and wait locally until a server is entered.
+            } else {
+                guard let url = URL(string: draft.smb.serverURL), url.scheme == "smb", url.host != nil,
+                      url.password == nil, url.user == nil, url.path.split(separator: "/").count == 1 else {
+                    throw UserFacingError("Adresse SMB attendue : smb://serveur/partage, sans identifiants intégrés.")
+                }
+                guard !draft.smb.username.trimmingCharacters(in: .whitespaces).isEmpty else {
+                    throw UserFacingError("Renseignez l’utilisateur du serveur SMB.")
+                }
             }
             try ensureLocalFolders(draft); try draft.save(); settings = draft; message = nil
         } catch { message = error.localizedDescription }
@@ -334,7 +341,13 @@ final class JobQueueService: ObservableObject {
             try Task.checkCancellation()
             value = try job(id)
             guard let localPath = value.localPath, let workRoot = value.workRoot, let digest = value.validatedDigest else { throw UserFacingError("MP4 local ou preuve de validation absente. Transfert refusé.") }
-            let configuration = value.smbConfiguration ?? runSettings.smb
+            // A film converted before any server was entered uses the server configured since.
+            let configuration = SMBConfiguration.effective(job: value.smbConfiguration, current: runSettings.smb)
+            guard configuration.isConfigured else {
+                serverRetryAfter = Date().addingTimeInterval(60)
+                try update(id) { $0.status = .waitingForServer; $0.error = "Serveur non configuré : renseignez l’adresse SMB et l’utilisateur dans Réglages → Serveur. Le MP4 reste sur ce Mac." }
+                return
+            }
             let mount: VerifiedMount
             do {
                 do { mount = try await smb.reconnect(configuration: configuration) }
@@ -403,7 +416,7 @@ final class JobQueueService: ObservableObject {
                 message = "Film transféré, nettoyage local impossible : \(text)"
                 return
             }
-            let serverMissing = (try? await smb.mountedShare(configuration: value?.smbConfiguration ?? runSettings.smb)) == nil
+            let serverMissing = (try? await smb.mountedShare(configuration: SMBConfiguration.effective(job: value?.smbConfiguration, current: runSettings.smb))) == nil
             let waiting = value?.validated == true && serverMissing && !conflict && !(error is OutputSafetyError)
             if waiting { serverRetryAfter = Date().addingTimeInterval(60) }
             try? update(id) { $0.status = waiting ? .waitingForServer : .failed; $0.error = text; $0.backupPath = backup?.path; $0.conflict = conflict }
@@ -434,7 +447,7 @@ final class JobQueueService: ObservableObject {
     }
     func connectServer(for id: UUID) {
         guard worker == nil, let value = try? job(id), value.validated, value.status == .waitingForServer else { return }
-        authenticationGate.allowRetry(configuration: value.smbConfiguration ?? settings.smb)
+        authenticationGate.allowRetry(configuration: SMBConfiguration.effective(job: value.smbConfiguration, current: settings.smb))
         retry(id)
     }
     func retry(_ id: UUID) {

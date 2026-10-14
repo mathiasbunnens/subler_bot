@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import ServiceManagement
+import AutomationCore
 
 // Remember only the exact Settings host; orderOut/rehosting must not lose its identity.
 @MainActor
@@ -144,8 +145,21 @@ struct SettingsView: View {
         Form {
             Section {
                 TextField("Adresse SMB", text: $draft.smb.serverURL, prompt: Text("smb://serveur/partage"))
-                TextField("Utilisateur", text: $draft.smb.username)
-                TextField("Montage attendu", text: $draft.smb.expectedMountPath, prompt: Text("/Volumes/Movies"))
+                TextField("Utilisateur", text: $draft.smb.username, prompt: Text(NSUserName()))
+                TextField("Montage attendu", text: $draft.smb.expectedMountPath, prompt: Text("/Volumes/partage"))
+                HStack {
+                    Text(SMBConfiguration.mountedSMBShares().isEmpty
+                         ? "Astuce : connectez-vous au partage dans le Finder (⌘K), puis détectez-le ici."
+                         : "Un partage SMB est déjà monté sur ce Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Détecter le partage monté") {
+                        let detected = SMBConfiguration.firstLaunchDefault()
+                        if detected.isConfigured { draft.smb = detected }
+                    }
+                    .foregroundStyle(Color.accentColor)
+                    .disabled(SMBConfiguration.mountedSMBShares().isEmpty)
+                }
             } header: { Label("Connexion SMB", systemImage: "externaldrive.badge.wifi") }
             Section {
                 Label("Identifiants dans le Trousseau macOS", systemImage: "key")

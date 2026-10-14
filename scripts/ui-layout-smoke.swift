@@ -29,6 +29,8 @@ struct UILayoutSmoke {
         let root = URL(fileURLWithPath: rootPath)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         var configuration = AppSettings()
+        // Layout fixtures model a configured server (no "Serveur non configuré" card).
+        configuration.smb = SMBConfiguration(serverURL: "smb://fixture.invalid/Movies", username: "fixture", expectedMountPath: "/Volumes/Fixture")
         configuration.sourcePath = root.appendingPathComponent("Source").path
         configuration.temporaryPath = root.appendingPathComponent("Temp").path
         configuration.paused = true; configuration.watchFolder = false; configuration.notifications = false
