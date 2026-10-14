@@ -52,6 +52,6 @@ Sans serveur configuré, les MP4 validés restent dans le dossier temporaire en 
 
 ## Pour aller plus loin
 
-[Guide technique et dépannage](docs/guide-technique.md) · [Résultats des tests](TEST-RESULTS.md)
+[Guide technique et dépannage](docs/guide-technique.md)
 
 Développement : `swift test`. Captures de démonstration isolées : `python3 scripts/render-ui.py`.
