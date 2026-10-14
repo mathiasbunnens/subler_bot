@@ -36,6 +36,8 @@ import AutomationCore
         settings.sourcePath = root.appendingPathComponent("Source").path
         settings.temporaryPath = root.appendingPathComponent("Temp").path
         settings.watchFolder = false; settings.notifications = false; settings.paused = true
+        // Presentation fixtures only: no connection is made to this example server.
+        settings.smb = SMBConfiguration(serverURL: "smb://fixture.invalid/Movies", username: "demo", expectedMountPath: "/Volumes/Movies")
         try! settings.save()
         try! QueueStore(root: root).save([])
         NSApplication.shared.setActivationPolicy(.prohibited)
@@ -59,11 +61,8 @@ import AutomationCore
                     try! FileManager.default.copyItem(at: URL(fileURLWithPath: fixture), to: poster)
                 }
                 sending.posterPath = poster.path
-                var manual = MovieJob(sourcePath: "/fixture/inconnu.mkv", fingerprint: "b")
-                manual.status = .paused; manual.needsSelection = true
-                manual.error = "Aucune métadonnée trouvée. Vérifiez le nom du MKV et le fournisseur dans Subler."
                 var done = MovieJob(sourcePath: "/fixture/old.mkv", fingerprint: "c"); done.status = .completed
-                queue.jobs = [sending, manual, done]
+                queue.jobs = [sending, done]
                 queue.activeID = sending.id
                 await render(MenuBarView(queue: queue), size: NSSize(width: 380, height: 700), appearance: name, to: out.appendingPathComponent("menu-transfer-\(suffix).png"), settle: 800_000_000)
 
