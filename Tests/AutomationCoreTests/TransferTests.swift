@@ -140,6 +140,23 @@ final class TransferTests: XCTestCase {
         return (root, share, source)
     }
 
+    func testSameSizeExistingFileComparisonReportsProgress() async throws {
+        let (root, share, source) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
+        let directory = share.appendingPathComponent("Movie")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let final = directory.appendingPathComponent("Movie.mp4")
+        let size = try Data(contentsOf: source).count
+        try Data(repeating: 0x5A, count: size).write(to: final)
+        let log = ProgressLog()
+        do {
+            _ = try await TransferService().copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: UUID(), verify: {}, progress: { await log.append($0) })
+            XCTFail("Expected conflict")
+        } catch TransferError.conflict {}
+        let samples = await log.samples
+        // Hashing a multi-GB local and server copy must never look frozen in the menu.
+        XCTAssertTrue(samples.contains { $0.verificationBytes == Int64(size) }, "Comparison must report verification progress")
+    }
+
     func testDuplicateRefusesWithoutChangingOriginal() async throws {
         let (root, share, source) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let directory = share.appendingPathComponent("Movie")

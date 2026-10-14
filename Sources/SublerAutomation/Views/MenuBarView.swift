@@ -9,6 +9,42 @@ private struct MenuContentHeightKey: PreferenceKey {
     }
 }
 
+private struct MenuRootHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// The MenuBarExtra popup window grows with its content but does not always
+/// shrink back (e.g. after an intervention or error card disappears), leaving
+/// an empty translucent band under the footer. Fit the popup window to the
+/// measured content height every time it changes, keeping its top edge under
+/// the menu bar. Other windows (normal-app main window) are left untouched.
+struct MenuWindowAutoSizer: NSViewRepresentable {
+    let height: CGFloat
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) {
+        let target = height
+        DispatchQueue.main.async { Self.fit(view.window, contentHeight: target) }
+    }
+
+    static func isMenuBarPopup(_ window: NSWindow) -> Bool {
+        String(describing: type(of: window)).contains("MenuBarExtra")
+    }
+
+    static func fit(_ window: NSWindow?, contentHeight: CGFloat) {
+        guard let window, contentHeight > 0, isMenuBarPopup(window) else { return }
+        var frame = window.frame
+        let wanted = window.frameRect(forContentRect: NSRect(x: 0, y: 0, width: frame.width, height: contentHeight)).height
+        guard abs(frame.height - wanted) > 0.5 else { return }
+        frame.origin.y += frame.height - wanted
+        frame.size.height = wanted
+        window.setFrame(frame, display: true)
+    }
+}
+
 struct TransferProgressView: View {
     let sample: TransferProgress
     var body: some View {
@@ -41,6 +77,7 @@ struct MenuBarView: View {
     @ObservedObject var queue: JobQueueService
     @Environment(\.openSettings) private var openSettings
     @State private var contentHeight: CGFloat = 0
+    @State private var rootHeight: CGFloat = 0
     // Keep drafts above the short/scroll container switch, keyed by job identity.
     @State private var manualDrafts: [UUID: ManualMetadataDraft] = [:]
     // Reserve space for the header, summary, footer, padding and menu-bar clearance.
@@ -71,7 +108,17 @@ struct MenuBarView: View {
             footer
         }
         .padding(14).frame(width: 380)
+        .fixedSize(horizontal: false, vertical: true)
         .background(.regularMaterial)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: MenuRootHeightKey.self, value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(MenuRootHeightKey.self) { height in
+            if height > 0 { rootHeight = height }
+        }
+        .background(MenuWindowAutoSizer(height: rootHeight))
         .controlSize(.small)
     }
 
@@ -151,7 +198,7 @@ struct MenuBarView: View {
                 metric(queue.jobs.filter { $0.status == .pending }.count, title: "En attente", color: .primary)
                 Divider().frame(height: 28)
                 metric(queue.batch.completed, title: "Terminés", color: .primary)
-                    .overlay(alignment: .topLeading) {
+                    .overlay(alignment: .topTrailing) {
                         Button { queue.resetBatchCounter() } label: {
                             Image(systemName: "arrow.counterclockwise").font(.system(size: 9, weight: .semibold))
                                 .frame(width: 16, height: 16).contentShape(Rectangle())
@@ -160,7 +207,7 @@ struct MenuBarView: View {
                         .disabled(queue.batch.completed == 0)
                         .help("Remettre le compteur à zéro (l’historique est conservé). Il repart aussi à zéro au lancement d’un nouveau lot.")
                         .accessibilityLabel("Remettre à zéro le compteur des films terminés")
-                        .offset(x: 4, y: -4)
+                        .offset(x: -4, y: -4)
                     }
                 Divider().frame(height: 28)
                 metric(interventions.count, title: "À vérifier", color: interventions.isEmpty ? .secondary : .orange)
