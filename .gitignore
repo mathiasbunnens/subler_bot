@@ -17,3 +17,6 @@ dist-update/
 *.key
 __pycache__/
 *.pyc
+
+# Local tests
+TEST-RESULTS.md
