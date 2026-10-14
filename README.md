@@ -5,12 +5,10 @@
 Une application native pour macOS qui pilote [Subler](https://subler.org/) et traite vos films un par un. Utilisez-la dans la barre des menus ou dans une fenêtre avec une icône dans le Dock.
 
 ## Aperçu
-
+ 
 | File en pause  | Film en cours  |
 | :---: | :---: |
-| <img width="300" alt="Capture d’écran 2026-10-14 à 16 56 04" src="https://github.com/user-attachments/assets/20acd57a-0754-4084-8f0b-6a441a4c1db7" />
- | <img width="300" alt="Capture d’écran 2026-10-14 à 18 23 20" src="https://github.com/user-attachments/assets/22d1b3e5-1d8e-4676-a02d-d26456b8a9f2" />
- |
+| <img width="300" alt="Capture d’écran 2026-10-14 à 16 56 04" src="https://github.com/user-attachments/assets/20acd57a-0754-4084-8f0b-6a441a4c1db7" /> | <img width="300" alt="Capture d’écran 2026-10-14 à 18 23 20" src="https://github.com/user-attachments/assets/22d1b3e5-1d8e-4676-a02d-d26456b8a9f2" /> |
 
 *Captures des vraies vues de l’application, avec des données de démonstration et une affiche fictive. Aucun film personnel n’est utilisé.*
 
