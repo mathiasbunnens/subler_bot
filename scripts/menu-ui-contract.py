@@ -77,7 +77,9 @@ class MenuUIContracts(unittest.TestCase):
             with self.subTest(action=action):
                 self.assertIn('queue.' + action, SOURCE)
         self.assertIn('if job.conflict', SOURCE)
-        self.assertIn('SettingsLink', SOURCE)
+        self.assertIn('@Environment(\.openSettings)', SOURCE)
+        self.assertIn('openSettings()\n                    SettingsWindowFocus.request()', SOURCE)
+        self.assertNotIn('.simultaneousGesture(TapGesture()', SOURCE)
         self.assertIn('SettingsWindowFocus.request()', SOURCE)
         self.assertIn('.keyboardShortcut("q")', SOURCE)
         self.assertNotRegex(SOURCE, r'queue\.(?:select|retry|ignore|confirmReplacement)\([^\n]+\)\s*\}\s*\.task')

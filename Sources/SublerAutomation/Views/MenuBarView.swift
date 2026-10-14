@@ -39,6 +39,7 @@ struct TransferProgressView: View {
 
 struct MenuBarView: View {
     @ObservedObject var queue: JobQueueService
+    @Environment(\.openSettings) private var openSettings
     @State private var contentHeight: CGFloat = 0
     // Reserve space for the header, summary, footer, padding and menu-bar clearance.
     private var contentHeightLimit: CGFloat {
@@ -270,10 +271,15 @@ struct MenuBarView: View {
                 Button { queue.openLogs() } label: {
                     Image(systemName: "doc.text").frame(width: 20, height: 18)
                 }.help("Voir les journaux").accessibilityLabel("Voir les journaux")
-                SettingsLink {
+                Button {
+                    // Invoke the scene and its focus request in the same action.
+                    // A simultaneous TapGesture is not a native button action
+                    // (keyboard/accessibility activation need not deliver it).
+                    openSettings()
+                    SettingsWindowFocus.request()
+                } label: {
                     Label("Réglages…", systemImage: "gearshape")
                 }.help("Ouvrir les réglages")
-                    .simultaneousGesture(TapGesture().onEnded { SettingsWindowFocus.request() })
                 Spacer(minLength: 0)
                 Button { queue.quit() } label: { Image(systemName: "power").frame(width: 20, height: 18) }
                     .help("Quitter Subler Automation").accessibilityLabel("Quitter")
