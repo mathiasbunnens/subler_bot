@@ -88,15 +88,15 @@ final class JobQueueService: ObservableObject {
     func ensureLocalFolders(_ configuration: AppSettings? = nil) throws {
         let configuration = configuration ?? settings
         for path in [configuration.sourcePath, configuration.temporaryPath] {
-            guard path.hasPrefix("/"), !path.hasPrefix("/Volumes/"), !path.contains("/../") else {
-                throw UserFacingError("Les dossiers source et temporaire doivent être locaux, avec un chemin absolu.")
+            guard path.hasPrefix("/"), !path.hasPrefix("/Volumes/"), !path.contains("/../"), LocalPathPolicy.isOnThisMac(path) else {
+                throw UserFacingError("Le dossier surveillé et le cache de conversion doivent être sur ce Mac (chemin absolu), jamais sur le serveur : seul le MP4 validé y est envoyé.")
             }
             let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
             var existing = url
             while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" { existing.deleteLastPathComponent() }
             let values = try existing.resourceValues(forKeys: [.volumeIsLocalKey])
             guard !url.path.hasPrefix("/Volumes/"), values.volumeIsLocal == true else {
-                throw UserFacingError("Conversion locale obligatoire : choisissez un dossier sur ce Mac.")
+                throw UserFacingError("Le dossier surveillé et le cache de conversion doivent être sur ce Mac, pas sur le serveur ni un volume réseau.")
             }
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
@@ -147,6 +147,12 @@ final class JobQueueService: ObservableObject {
     private func enqueue(_ urls: [URL], explicit: Bool) {
         guard !fatalPersistenceError, let store else { return }
         for url in urls where url.pathExtension.lowercased() == "mkv" {
+            // Converting from the server would read the whole film over the network,
+            // then send it back: only MKV files stored on this Mac are accepted.
+            guard LocalPathPolicy.isOnThisMac(url.path) else {
+                message = "Ajout refusé : \(url.lastPathComponent) est sur le serveur ou un volume externe. Copiez le MKV dans le dossier surveillé sur ce Mac."
+                continue
+            }
             do {
                 let fingerprint = try FileIdentity.fingerprint(url)
                 if !explicit {
@@ -304,6 +310,23 @@ final class JobQueueService: ObservableObject {
                         return
                     }
                     expected = chosen
+                    // Avoid a useless conversion and transfer when this film is already on the
+                    // server. Only an already mounted share is checked: no connection or prompt.
+                    let identityTitle = value.manualMetadata?.title ?? chosen?.title
+                    let identityYear = value.manualMetadata?.year ?? chosen?.year
+                    let share = SMBConfiguration.effective(job: value.smbConfiguration, current: runSettings.smb)
+                    if !replacements.contains(id), share.isConfigured, let identityTitle, let identityYear,
+                       let mounted = try? await smb.mountedShare(configuration: share) {
+                        let name = MovieNaming.name(title: identityTitle, year: identityYear)
+                        let published = LocalPathPolicy.publishedMovie(shareRoot: mounted.root, movieName: name)
+                        if FileManager.default.fileExists(atPath: published.path) {
+                            await subler.close(document: document)
+                            openedDocument = nil
+                            try update(id) { $0.title = identityTitle; $0.year = identityYear; $0.candidateIndex = chosen?.index; $0.candidateRaw = chosen?.raw; $0.status = .paused; $0.conflict = true; $0.needsSelection = false; $0.error = "Déjà sur le serveur : \(published.path). Conversion et envoi évités. Ignorer pour le laisser, ou Remplacer… pour l’envoyer quand même (l’ancien est conservé en sauvegarde)." }
+                            notify(id, "\(name) est déjà sur le serveur : rien n’a été envoyé.")
+                            return
+                        }
+                    }
                     try ensureLocalFolders(runSettings)
                     let folder = URL(fileURLWithPath: runSettings.temporaryPath).appendingPathComponent(id.uuidString)
                     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
