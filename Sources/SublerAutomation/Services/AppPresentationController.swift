@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+import AutomationCore
 
 /// Owns an actual native main window, sharing the same live queue as the menu.
 @MainActor
@@ -10,12 +11,24 @@ final class AppPresentationController {
     private(set) var mode: AppPresentationMode = .menuBar
     private weak var queue: JobQueueService?
     private var settingsObserver: AnyCancellable?
+    private var dockBadgeObserver: AnyCancellable?
 
     func bind(_ queue: JobQueueService) {
         self.queue = queue
+        dockBadgeObserver = queue.$jobs.combineLatest(queue.$settings)
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] jobs, settings in
+                self?.updateDockBadge(jobs: jobs, mode: settings.presentationMode)
+            }
         settingsObserver = queue.$settings.map(\.presentationMode).removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] mode in self?.apply(mode) }
+    }
+
+    func updateDockBadge(jobs: [MovieJob], mode: AppPresentationMode) {
+        let decoration = QueueStatusDecoration.resolve(jobs: jobs, currentJob: nil,
+            message: nil, hasCompletedThisSession: false)
+        NSApp.dockTile.badgeLabel = mode == .normal ? decoration.dockBadgeLabel : nil
     }
 
     func apply(_ mode: AppPresentationMode) {

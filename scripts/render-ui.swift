@@ -46,6 +46,29 @@ import AutomationCore
             try? await Task.sleep(nanoseconds: 800_000_000)
             for name in [NSAppearance.Name.aqua, .darkAqua] {
                 let suffix = name == .aqua ? "light" : "dark"
+                var intervention = MovieJob(sourcePath: "/fixture/unknown.mkv", fingerprint: "warning")
+                intervention.status = .paused; intervention.needsSelection = true
+                let controller = AppPresentationController.shared
+                controller.updateDockBadge(jobs: [intervention], mode: .normal)
+                precondition(NSApp.dockTile.badgeLabel == "!")
+                controller.updateDockBadge(jobs: [intervention], mode: .menuBar)
+                precondition(NSApp.dockTile.badgeLabel == nil)
+                controller.updateDockBadge(jobs: [], mode: .normal)
+                precondition(NSApp.dockTile.badgeLabel == nil)
+                for (title, symbol, finished, warning) in [
+                    ("idle", "film", false, false),
+                    ("confirmation", "film", false, true),
+                    ("confirmation-transfer", "externaldrive.badge.wifi", true, true),
+                    ("failed", "exclamationmark.triangle", false, false),
+                    ("finished", "film", true, false)
+                ] {
+                    let icon = MenuBarStatusImage.image(symbol: symbol, finished: finished,
+                        dark: name == .darkAqua, needsConfirmation: warning)
+                    if warning { precondition(icon.accessibilityDescription == "Métadonnées à confirmer") }
+                    await render(Image(nsImage: icon).padding(12).background(name == .aqua ? Color.white : Color.black),
+                        size: NSSize(width: 46, height: 44), appearance: name,
+                        to: out.appendingPathComponent("icon-\(title)-\(suffix).png"))
+                }
                 queue.jobs = []; queue.activeID = nil; queue.progress = nil
                 await render(MenuBarView(queue: queue), size: NSSize(width: 380, height: 600), appearance: name, to: out.appendingPathComponent("menu-idle-\(suffix).png"))
 

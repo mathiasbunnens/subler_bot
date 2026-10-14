@@ -30,8 +30,10 @@ class SettingsUIContracts(unittest.TestCase):
         file = Path(__file__).resolve().parent.parent / 'Sources/SublerAutomation/Views/MenuBarStatusLabel.swift'
         self.assertTrue(file.exists(), 'Native completion badge label is missing')
         label = file.read_text()
-        for text in ['isTemplate = false', 'checkmark.circle.fill', 'badgeRect', 'NSColor.systemGreen', '.completed']:
+        for text in ['isTemplate = false', 'checkmark.circle.fill', 'badgeRect', 'NSColor.systemGreen', 'QueueStatusDecoration.resolve']:
             self.assertIn(text, label)
+        core = (Path(__file__).resolve().parent.parent / 'Sources/AutomationCore/QueueStatusDecoration.swift').read_text()
+        self.assertIn('$0.status == .completed', core)
 
     def test_native_tabs_and_fixed_save_footer(self):
         self.assertIn("TabView", SOURCE)
