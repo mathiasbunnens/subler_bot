@@ -12,6 +12,7 @@ final class JobQueueService: ObservableObject {
     @Published var message: String?
     @Published var candidates: [UUID: [MetadataCandidate]] = [:]
     @Published private(set) var hasCompletedThisSession = false
+    @Published private(set) var batch = BatchCounter()
     let permissions: PermissionPreparationService
     private var permissionObserver: AnyCancellable?
     private var preparingPermissions = true
@@ -240,10 +241,12 @@ final class JobQueueService: ObservableObject {
             catch { return }
         }
         activeID = id; progress = nil
+        batch.jobStarted()
         worker = Task { [weak self] in
             guard let self else { return }
             await self.process(id)
             self.activeID = nil; self.progress = nil; self.worker = nil
+            self.batch.workerFinished(remaining: self.jobs)
         }
     }
     private func process(_ id: UUID) async {
@@ -358,6 +361,7 @@ final class JobQueueService: ObservableObject {
             let backup = await transfer.preservedBackup(jobID: id)
             try update(id) { $0.status = .completed; $0.destinationPath = destination.path; $0.backupPath = backup?.path; $0.error = nil; $0.conflict = false }
             hasCompletedThisSession = true
+            batch.recordCompletion()
             notify(id, "\(value.displayName) est disponible sur votre serveur.")
             if let backup { store?.log("\(id): ancien MP4 conservé dans \(backup.path)") }
             if value.cleanupAfterTransfer == true {
@@ -458,6 +462,8 @@ final class JobQueueService: ObservableObject {
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         replacements.insert(id); retry(id)
     }
+    /// Resets only the visible batch count; completed history is kept.
+    func resetBatchCounter() { batch.reset() }
     func cancelTransfer() {
         guard currentJob?.status == .transferring else { return }
         worker?.cancel()
