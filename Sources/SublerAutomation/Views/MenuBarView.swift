@@ -41,6 +41,8 @@ struct MenuBarView: View {
     @ObservedObject var queue: JobQueueService
     @Environment(\.openSettings) private var openSettings
     @State private var contentHeight: CGFloat = 0
+    // Keep drafts above the short/scroll container switch, keyed by job identity.
+    @State private var manualDrafts: [UUID: ManualMetadataDraft] = [:]
     // Reserve space for the header, summary, footer, padding and menu-bar clearance.
     private var contentHeightLimit: CGFloat {
         max(80, min(460, (NSScreen.main?.visibleFrame.height ?? 800) - 260))
@@ -79,6 +81,14 @@ struct MenuBarView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let job = queue.currentJob { activeCard(job) }
             else { idleCard }
+            ForEach(queue.jobs.filter { value in value.manualMetadata != nil && value.id != queue.activeID && !interventions.contains(where: { $0.id == value.id }) }.suffix(3)) { job in
+                card {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(job.displayName).font(.caption).bold()
+                        metadataWarning(job)
+                    }
+                }
+            }
             if !queue.permissions.state.isReady {
                 card {
                     VStack(alignment: .leading, spacing: 8) {
@@ -178,6 +188,7 @@ struct MenuBarView: View {
                     }
                 }
                 Text(job.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(2).textSelection(.enabled)
+                metadataWarning(job)
                 if let progress = queue.progress { TransferProgressView(sample: progress) }
                 else {
                     HStack(spacing: 6) {
@@ -232,12 +243,16 @@ struct MenuBarView: View {
                     Text(job.displayName).font(.subheadline).bold().lineLimit(2)
                 }
                 Text(label(job.status)).font(.caption2).foregroundStyle(.secondary)
+                metadataWarning(job)
                 if let error = job.error {
                     Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if job.needsSelection, let choices = queue.candidates[job.id], !choices.isEmpty {
                     candidateRows(choices, for: job)
+                }
+                if job.canEditMetadata {
+                    ManualMetadataForm(queue: queue, job: job, draft: manualDraft(job)).id(job.id)
                 }
                 HStack(spacing: 6) {
                     if job.status == .waitingForServer, job.validated {
@@ -260,6 +275,19 @@ struct MenuBarView: View {
                 .buttonStyle(.borderless)
                 .disabled(queue.activeID == job.id)
             }
+        }
+    }
+
+    private func manualDraft(_ job: MovieJob) -> Binding<ManualMetadataDraft> {
+        Binding(get: { manualDrafts[job.id] ?? ManualMetadataDraft(job: job) },
+                set: { manualDrafts[job.id] = $0 })
+    }
+
+    @ViewBuilder private func metadataWarning(_ job: MovieJob) -> some View {
+        if let warning = job.metadataWarning {
+            Label(warning, systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
