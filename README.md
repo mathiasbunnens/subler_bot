@@ -29,7 +29,7 @@ Dans À vérifier, la corbeille retire uniquement la tâche après confirmation 
 
 Une ancienne demande de métadonnées restée en attente est récupérée comme intervention, pas relancée automatiquement. La suppression reste possible si le fichier source a disparu. Réessayer explique alors le chemin manquant : remettre le MKV à cet emplacement permet une reprise ; sinon retirer la tâche. Aucun fichier absent n’est recréé par cette suppression.
 
-La conversion reste locale dans `~/Movies/Subler Automation/Temp/<identifiant>/`. La barre des menus affiche une animation indéterminée pendant la conversion ; aucun pourcentage de conversion inventé. Le transfert affiche les octets effectivement écrits, la vitesse et l’estimation de durée restante. À 100 % des octets écrits, la vérification d’intégrité peut encore prendre du temps : le fichier n’est pas encore publié.
+La conversion utilise par défaut le cache local `~/Movies/Subler Automation/Temp/<identifiant>/` ; un cache sur un partage monté est également autorisé, avec un avertissement de performance. La barre des menus affiche une animation indéterminée pendant la conversion ; aucun pourcentage de conversion inventé. Le transfert affiche les octets effectivement écrits, la vitesse et l’estimation de durée restante. À 100 % des octets écrits, la vérification d’intégrité peut encore prendre du temps : le fichier n’est pas encore publié.
 
 La pause arrête les nouveaux travaux après le film en cours ; elle ne stoppe jamais globalement la file de Subler. Un transfert peut être suspendu ; les copies originales et locales sont conservées. Quitter pendant une conversion ne tue pas Subler : au relancement, son élément de file est vérifié et ne sera jamais considéré terminé du seul fait qu’un MP4 existe.
 
@@ -44,7 +44,7 @@ Serveur SMB : aucune adresse personnelle n’est intégrée. Si un partage SMB e
 
 ## Serveur et intégrité
 
-Seul le MP4 validé est envoyé au serveur. Le dossier surveillé, le cache de conversion et les MKV traités doivent être sur ce Mac : un dossier ou un MKV situé sur le serveur (ou sous /Volumes) est refusé dès le choix dans les réglages, l’ajout manuel ou le service Finder, pour éviter de relire puis renvoyer le film par le réseau. Si le film identifié existe déjà sur le partage monté (`<Titre (Année)>/<Titre (Année)>.mp4`), la conversion et l’envoi sont évités : la tâche passe « À vérifier » avec Ignorer ou Remplacer… (l’ancien fichier est alors conservé en sauvegarde).
+Seul le MP4 validé est publié dans la destination finale. Le dossier surveillé, le cache de conversion et les MKV peuvent se trouver sur un partage monté ou un disque externe : ce choix n’est pas refusé pour des raisons de performance. Les réglages, le menu et le service Finder affichent un conseil non bloquant : le stockage local est recommandé, car les lectures et écritures réseau peuvent ralentir le traitement. Un partage absent, des permissions refusées, un chemin invalide ou un MP4 qui échoue aux contrôles de propriété/intégrité restent de vrais blocages. Aucun dossier de remplacement n’est créé à la place d’un volume non monté. Si le film identifié existe déjà sur le partage monté (`<Titre (Année)>/<Titre (Année)>.mp4`), la conversion et l’envoi sont évités : la tâche passe « À vérifier » avec Ignorer ou Remplacer… (l’ancien fichier est alors conservé en sauvegarde).
 
 Exemple : `smb://192.168.1.100/Movies`, utilisateur `adminMat`, chemin attendu `/Volumes/Movies`.
 
@@ -78,6 +78,8 @@ Ne pas démarrer simultanément des opérations manuelles dans la file partagée
 ## Développement et tests
 
 `swift test` : tests déterministes avec fichiers temporaires, sans films personnels.
+
+`python3 scripts/storage-location-contract.py` : contrats de câblage du conseil de performance et des garde-fous conservés ; ce contrôle statique ne prouve pas une conversion réelle sur SMB.
 
 `./build.sh` : compilation release, génération de l’icône, création et signature de l’app.
 

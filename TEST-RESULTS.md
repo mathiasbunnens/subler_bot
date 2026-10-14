@@ -96,3 +96,41 @@ Build release et vérification codesign réussis. APP_SMOKE_PASS sur le nouveau 
 Le bundle utilisateur a été remplacé et relancé seulement après confirmation que le transfert réel avait terminé et que la tâche restante était en pause. L’ancien bundle est conservé sous `dist/.previous-35e96443-84b2-4977-9e97-d7c19a4f8db5`.
 
 Le gain de durée sur un film complet n’a pas encore été mesuré avec cette version. Le volume de relecture distante passe de quatre passes complètes à une ; le débit reste dépendant du NAS et du réseau. L’affichage graphique de la nouvelle progression n’a pas été validé par capture d’écran.
+
+## Stockage réseau autorisé avec conseil de performance
+
+La dernière correction laissée en suspens remplace les refus fondés sur la localisation
+par un conseil non bloquant, dans les réglages, le menu et le service Finder.
+Source surveillée, MKV ajoutés et cache peuvent utiliser un partage monté ou un disque
+externe. Chemins absolus sûrs, accès autorisés, volume réellement monté et contrôles
+de propriété/intégrité du MP4 restent obligatoires ; aucun substitut de montage n’est créé.
+Le conseil de performance est séparé du message d’erreur de la file.
+
+Vérifications de cette correction (fixtures isolées, aucun film personnel) :
+
+- Tests d’abord rouges pour l’acceptation des chemins réseau par la préparation des
+  permissions, le conseil de performance et l’acceptation Finder ; puis verts.
+- `MANUAL_METADATA_FFMPEG=<ffmpeg installé> swift test --filter
+  'LocalPathPolicyTests|PermissionPreparationTests|FinderSubmissionTests|OutputSafetyTests|ManualMetadataTests|TransferTests'` :
+  54 cas, 51 réussis, 3 intégrations SMB opt-in ignorées, 0 échec. Les vérifications
+  synthétiques des métadonnées et de l’intégrité ont réellement été exécutées.
+- `python3 scripts/storage-location-contract.py` : 3 contrats statiques réussis.
+- `python3 scripts/settings-ui-contract.py` : 5 contrats statiques réussis.
+- `python3 scripts/permission-tests.py` : sondes scratch, refus/révocation, aucun
+  prompt natif ; services et vraies vues Réglages compilés, tous marqueurs PASS présents.
+- `python3 scripts/ui-layout-smoke.py --layout-only` : popup natif long→court→suppression→idle,
+  contrôles transparents, défilement borné, persistance et sources préservées ; PASS.
+  Premier essai interrompu par une fermeture inattendue du popup, puis scénario complet
+  réussi sur relance sérialisée, sans changement ni assouplissement des assertions.
+  Les contrôles de premier plan sont explicitement exclus de cette commande.
+- Bundle release signé ad hoc et `codesign --verify --deep --strict` réussi :
+  `dist-update/storage-advice-20261014-162122/Subler Automation.app`.
+- `APP_SMOKE_PASS` sur ce bundle : surveillance en pause, persistance, déduplication,
+  verrou d’instance et récupération ; preuve scratch `subler-app-smoke-y3rawopg`.
+
+Journaux : `~/.hermes/cache/scratch/subler-final-targeted.log`,
+`subler-native-permissions.log`, `subler-storage-ui-retry.log` et `subler-storage-build.log`.
+Le contrôle du chemin d’un partage déjà monté utilise seulement ses métadonnées.
+Aucune conversion ni écriture sur un vrai partage n’a été lancée pour cette correction ;
+le parcours avec source/cache SMB n’est donc pas vérifié de bout en bout.
+L’instance utilisateur n’a pas été remplacée ou relancée.

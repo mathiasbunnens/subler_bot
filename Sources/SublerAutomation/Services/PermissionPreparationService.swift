@@ -113,12 +113,7 @@ enum PermissionNativeAccess {
         }.value
     }
     static func localDirectory(_ path: String) throws -> URL {
-        let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-        guard !url.path.hasPrefix("/Volumes/") else { throw CocoaError(.fileReadNoPermission) }
-        var existing = url
-        while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" { existing.deleteLastPathComponent() }
-        guard try existing.resourceValues(forKeys: [.volumeIsLocalKey]).volumeIsLocal == true else { throw CocoaError(.fileReadNoPermission) }
-        return url
+        try LocalPathPolicy.directoryURL(path)
     }
     static func directoryRead(_ path: String, request: Bool, local: Bool) async -> String? {
         await Task.detached(priority: .utility) {

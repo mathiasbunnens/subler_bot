@@ -10,6 +10,7 @@ final class JobQueueService: ObservableObject {
     @Published var activeID: UUID?
     @Published var progress: TransferProgress?
     @Published var message: String?
+    @Published private(set) var storageAdvice: String?
     @Published var candidates: [UUID: [MetadataCandidate]] = [:]
     @Published private(set) var hasCompletedThisSession = false
     @Published private(set) var batch = BatchCounter()
@@ -41,6 +42,7 @@ final class JobQueueService: ObservableObject {
         self.permissions = permissions ?? .shared
         do {
             settings = try AppSettings.load()
+            storageAdvice = [settings.sourcePath, settings.temporaryPath].compactMap(LocalPathPolicy.performanceWarning).first
             store = try QueueStore(root: AppSettings.file.deletingLastPathComponent())
             jobs = try store!.load()
             for index in jobs.indices { jobs[index].recover() }
@@ -88,16 +90,7 @@ final class JobQueueService: ObservableObject {
     func ensureLocalFolders(_ configuration: AppSettings? = nil) throws {
         let configuration = configuration ?? settings
         for path in [configuration.sourcePath, configuration.temporaryPath] {
-            guard path.hasPrefix("/"), !path.hasPrefix("/Volumes/"), !path.contains("/../"), LocalPathPolicy.isOnThisMac(path) else {
-                throw UserFacingError("Le dossier surveillé et le cache de conversion doivent être sur ce Mac (chemin absolu), jamais sur le serveur : seul le MP4 validé y est envoyé.")
-            }
-            let url = URL(fileURLWithPath: path).resolvingSymlinksInPath()
-            var existing = url
-            while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" { existing.deleteLastPathComponent() }
-            let values = try existing.resourceValues(forKeys: [.volumeIsLocalKey])
-            guard !url.path.hasPrefix("/Volumes/"), values.volumeIsLocal == true else {
-                throw UserFacingError("Le dossier surveillé et le cache de conversion doivent être sur ce Mac, pas sur le serveur ni un volume réseau.")
-            }
+            let url = try LocalPathPolicy.directoryURL(path)
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
     }
@@ -121,6 +114,7 @@ final class JobQueueService: ObservableObject {
                 }
             }
             try ensureLocalFolders(draft); try draft.save(); settings = draft; message = nil
+            storageAdvice = [draft.sourcePath, draft.temporaryPath].compactMap(LocalPathPolicy.performanceWarning).first
         } catch { message = error.localizedDescription }
     }
     private func persist() throws {
@@ -147,12 +141,11 @@ final class JobQueueService: ObservableObject {
     private func enqueue(_ urls: [URL], explicit: Bool) {
         guard !fatalPersistenceError, let store else { return }
         for url in urls where url.pathExtension.lowercased() == "mkv" {
-            // Converting from the server would read the whole film over the network,
-            // then send it back: only MKV files stored on this Mac are accepted.
-            guard LocalPathPolicy.isOnThisMac(url.path) else {
-                message = "Ajout refusé : \(url.lastPathComponent) est sur le serveur ou un volume externe. Copiez le MKV dans le dossier surveillé sur ce Mac."
+            guard url.isFileURL, LocalPathPolicy.isValidAbsolutePath(url.path) else {
+                message = "Ajout impossible : choisissez un fichier MKV avec un chemin absolu valide."
                 continue
             }
+            if let advice = LocalPathPolicy.performanceWarning(url.path), storageAdvice != advice { storageAdvice = advice }
             do {
                 let fingerprint = try FileIdentity.fingerprint(url)
                 if !explicit {
@@ -368,7 +361,7 @@ final class JobQueueService: ObservableObject {
             let configuration = SMBConfiguration.effective(job: value.smbConfiguration, current: runSettings.smb)
             guard configuration.isConfigured else {
                 serverRetryAfter = Date().addingTimeInterval(60)
-                try update(id) { $0.status = .waitingForServer; $0.error = "Serveur non configuré : renseignez l’adresse SMB et l’utilisateur dans Réglages → Serveur. Le MP4 reste sur ce Mac." }
+                try update(id) { $0.status = .waitingForServer; $0.error = "Serveur non configuré : renseignez l’adresse SMB et l’utilisateur dans Réglages → Serveur. Le MP4 reste dans le dossier temporaire." }
                 return
             }
             let mount: VerifiedMount
@@ -387,12 +380,12 @@ final class JobQueueService: ObservableObject {
             catch {
                 serverRetryAfter = Date().addingTimeInterval(60)
                 try update(id) { $0.status = .waitingForServer; $0.error = "Serveur indisponible : \(error.localizedDescription). MP4 conservé localement." }
-                notify(id, "Serveur indisponible. Le MP4 reste sur ce Mac.")
+                notify(id, "Serveur indisponible. Le MP4 reste dans le dossier temporaire.")
                 return
             }
             await permissions.recheck(permissionScope)
             guard permissions.isReady(for: permissionScope) else {
-                try update(id) { $0.status = .waitingForServer; $0.error = "Préparez l’accès au partage monté dans Réglages → Autorisations. Le MP4 reste sur ce Mac." }
+                try update(id) { $0.status = .waitingForServer; $0.error = "Préparez l’accès au partage monté dans Réglages → Autorisations. Le MP4 reste dans le dossier temporaire." }
                 return
             }
             _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
