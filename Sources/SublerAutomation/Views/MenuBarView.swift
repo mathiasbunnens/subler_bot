@@ -126,6 +126,11 @@ struct MenuBarView: View {
     // complete content exceeds the available screen space, not as an empty slot.
     private var menuContent: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let advice = queue.storageAdvice {
+                Label(advice, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let job = queue.currentJob { activeCard(job) }
             else { idleCard }
             ForEach(queue.jobs.filter { value in value.manualMetadata != nil && value.id != queue.activeID && !interventions.contains(where: { $0.id == value.id }) }.suffix(3)) { job in
@@ -158,7 +163,7 @@ struct MenuBarView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Label("Serveur non configuré", systemImage: "externaldrive.badge.questionmark")
                             .font(.subheadline).bold()
-                        Text("Les films sont convertis puis gardés sur ce Mac jusqu’à ce que le partage SMB soit renseigné.")
+                        Text("Les films sont convertis puis gardés dans le dossier temporaire jusqu’à ce que le partage SMB soit renseigné.")
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         Button("Configurer le serveur…") { openSettings(); SettingsWindowFocus.request() }
                             .buttonStyle(.borderless).foregroundStyle(Color.accentColor)

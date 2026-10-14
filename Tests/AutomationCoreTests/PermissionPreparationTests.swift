@@ -2,6 +2,19 @@ import XCTest
 @testable import AutomationCore
 
 final class PermissionPreparationTests: XCTestCase {
+    @MainActor func testMountedSourceAndCacheAreAllowedAfterPermissions() async {
+        let scope = PermissionScope(sourcePath: "/Volumes/Fixture/Source", temporaryPath: "/Volumes/Fixture/Cache", serverURL: "", expectedMountPath: "", notifications: false)
+        var checked: [String] = []
+        var saved: PermissionGrant?
+        let engine = PermissionPreparation(operations: .init(automation: { _ in .granted }, sourceRead: { path, _ in checked.append(path); return nil }, temporaryWrite: { path, _ in checked.append(path); return nil }, mountedShare: { _ in nil }, networkRead: { _, _ in nil }, notifications: { _ in .granted }, load: { saved }, save: { saved = $0 }))
+        await engine.prepare(scope)
+        XCTAssertTrue(engine.state.isReady)
+        XCTAssertEqual(checked, [scope.sourcePath, scope.temporaryPath])
+        XCTAssertEqual(saved?.scope, scope)
+        await engine.recheck(scope)
+        XCTAssertTrue(engine.state.isReady)
+    }
+
     @MainActor func testCredentialURLsNeverPersist() async {
         var saved = false
         let engine = PermissionPreparation(operations: .init(automation: { _ in .granted }, sourceRead: { _, _ in nil }, temporaryWrite: { _, _ in nil }, mountedShare: { _ in nil }, networkRead: { _, _ in nil }, notifications: { _ in .granted }, load: { nil }, save: { _ in saved = true }))

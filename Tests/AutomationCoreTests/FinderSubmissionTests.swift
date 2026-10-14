@@ -48,4 +48,16 @@ final class FinderSubmissionTests: XCTestCase {
         XCTAssertEqual(FinderSubmission.summary(result, added: 1), "1 film ajouté à la file · 1 déjà dans la file · ignoré (MKV uniquement) : c.avi")
         XCTAssertEqual(FinderSubmission.summary(.init(), added: 0), "Aucun fichier reçu.")
     }
+
+    func testRemoteMKVIsAcceptedWithNonBlockingAdvice() throws {
+        let source = try file("remote.mkv")
+        let result = FinderSubmission.partition([source], isOnThisMac: { _ in false })
+        XCTAssertEqual(result.accepted, [source])
+        XCTAssertEqual(result.remote, [source])
+        XCTAssertTrue(result.rejected.isEmpty)
+        let message = FinderSubmission.summary(result, added: 1)
+        XCTAssertTrue(message.contains("1 film ajouté"))
+        XCTAssertTrue(message.contains("ralentir"))
+        XCTAssertFalse(message.contains("non envoyé"))
+    }
 }

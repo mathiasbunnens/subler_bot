@@ -54,8 +54,8 @@ public enum PermissionPreparationState: Equatable, Sendable {
         state = .requesting
         checkedScope = nil
         hasRecordedScope = false
-        guard [scope.sourcePath, scope.temporaryPath].allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") && !$0.split(separator: "/").contains("..") && !$0.hasPrefix("/Volumes/") }) else {
-            state = .blocked("Choisissez des dossiers locaux avec des chemins absolus."); return
+        guard [scope.sourcePath, scope.temporaryPath].allSatisfy(LocalPathPolicy.isValidAbsolutePath) else {
+            state = .blocked("Choisissez des dossiers avec des chemins absolus, sans traversée de répertoire."); return
         }
         // An empty server means "not configured yet" (first installation): conversion
         // may proceed and validated films wait locally until a share is configured.

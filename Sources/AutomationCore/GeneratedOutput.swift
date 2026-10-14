@@ -10,8 +10,7 @@ public enum GeneratedOutput {
                   url.deletingLastPathComponent().lastPathComponent == jobID.uuidString,
                   url.deletingLastPathComponent().deletingLastPathComponent().standardizedFileURL == root.standardizedFileURL,
                   url.standardizedFileURL == url.resolvingSymlinksInPath(),
-                  source.resolvingSymlinksInPath() != url.resolvingSymlinksInPath(),
-                  try url.resourceValues(forKeys: [.volumeIsLocalKey]).volumeIsLocal == true else {
+                  source.resolvingSymlinksInPath() != url.resolvingSymlinksInPath() else {
                 throw OutputSafetyError.invalidOwnership
             }
             let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
@@ -46,8 +45,8 @@ public enum OutputSafetyError: LocalizedError {
     case invalidOwnership, changed
     public var errorDescription: String? {
         switch self {
-        case .invalidOwnership: return "Le MP4 n’est pas un fichier temporaire local appartenant à cette tâche. Transfert et nettoyage refusés."
-        case .changed: return "Le MP4 local a changé depuis sa validation. Aucun transfert ni nettoyage autorisé."
+        case .invalidOwnership: return "Le MP4 n’est pas un fichier temporaire appartenant à cette tâche. Transfert et nettoyage refusés."
+        case .changed: return "Le MP4 temporaire a changé depuis sa validation. Aucun transfert ni nettoyage autorisé."
         }
     }
 }

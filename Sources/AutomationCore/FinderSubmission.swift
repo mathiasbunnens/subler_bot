@@ -7,11 +7,11 @@ public enum FinderSubmission {
     public struct Result: Equatable, Sendable {
         public var accepted: [URL] = []
         public var rejected: [URL] = []
-        /// MKV files on the server or another volume: never converted from there.
+        /// Accepted MKV files on the server/another volume: advice only, not rejection.
         public var remote: [URL] = []
     }
 
-    public static func partition(_ urls: [URL]) -> Result {
+    public static func partition(_ urls: [URL], isOnThisMac: (String) -> Bool = LocalPathPolicy.isOnThisMac) -> Result {
         var result = Result()
         var seen = Set<String>()
         for url in urls {
@@ -20,7 +20,8 @@ public enum FinderSubmission {
             var isDirectory: ObjCBool = false
             let exists = FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory)
             if file.isFileURL, exists, !isDirectory.boolValue, file.pathExtension.lowercased() == "mkv" {
-                if LocalPathPolicy.isOnThisMac(file.path) { result.accepted.append(file) } else { result.remote.append(file) }
+                result.accepted.append(file)
+                if !isOnThisMac(file.path) { result.remote.append(file) }
             } else {
                 result.rejected.append(file)
             }
@@ -36,7 +37,7 @@ public enum FinderSubmission {
         if duplicates > 0 { parts.append(duplicates == 1 ? "1 déjà dans la file" : "\(duplicates) déjà dans la file") }
         if !result.remote.isEmpty {
             let names = result.remote.prefix(3).map(\.lastPathComponent).joined(separator: ", ")
-            parts.append("non envoyé (déjà sur le serveur ou un volume externe, copiez-le sur ce Mac) : \(names)\(result.remote.count > 3 ? "…" : "")")
+            parts.append("emplacement réseau ou externe : peut ralentir le traitement, stockage local conseillé — \(names)\(result.remote.count > 3 ? "…" : "")")
         }
         if !result.rejected.isEmpty {
             let names = result.rejected.prefix(3).map(\.lastPathComponent).joined(separator: ", ")

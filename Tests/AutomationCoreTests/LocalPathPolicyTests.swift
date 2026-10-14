@@ -2,6 +2,20 @@ import XCTest
 @testable import AutomationCore
 
 final class LocalPathPolicyTests: XCTestCase {
+    func testNetworkPathIsValidButDisplaysPerformanceAdvice() throws {
+        let path = "/Volumes/subler-unmounted-\(UUID().uuidString)/Source"
+        XCTAssertTrue(LocalPathPolicy.isValidAbsolutePath(path))
+        let warning = try XCTUnwrap(LocalPathPolicy.performanceWarning(path))
+        XCTAssertTrue(warning.contains("ralentir"))
+        XCTAssertTrue(warning.contains("conseillé"))
+        XCTAssertNil(LocalPathPolicy.performanceWarning(NSHomeDirectory()))
+        XCTAssertFalse(LocalPathPolicy.isValidAbsolutePath("relative/path"))
+        XCTAssertFalse(LocalPathPolicy.isValidAbsolutePath("/Source/../Other"))
+        XCTAssertFalse(LocalPathPolicy.isValidAbsolutePath("/Source\0Other"))
+        // A missing mount is an actual availability failure, never a local substitute.
+        XCTAssertThrowsError(try LocalPathPolicy.directoryURL(path))
+    }
+
     func testLocalHomeFoldersAreAccepted() throws {
         let scratch = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".hermes/cache/scratch")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
@@ -26,6 +40,8 @@ final class LocalPathPolicyTests: XCTestCase {
     func testMountedShareIsRefusedWhenPresent() throws {
         guard let share = SMBConfiguration.mountedSMBShares().first else { throw XCTSkip("No SMB share mounted") }
         XCTAssertFalse(LocalPathPolicy.isOnThisMac(share.mountPoint))
+        // Read-only metadata lookup: the warning must not prevent using the mounted path.
+        XCTAssertEqual(try LocalPathPolicy.directoryURL(share.mountPoint).path, share.mountPoint)
     }
 
     func testPublishedMoviePathMatchesTransferLayout() {

@@ -131,9 +131,9 @@ struct SettingsView: View {
             } header: { Label("Dossier source", systemImage: "folder.badge.plus") }
             Section {
                 folder("MP4 temporaires", path: $draft.temporaryPath)
-                Text("La conversion reste sur ce Mac. Les films sont transférés après validation du MP4.")
+                Text("Un dossier local est conseillé pour éviter les allers-retours réseau. Un dossier sur le serveur reste autorisé ; les MP4 sont validés avant transfert.")
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Label("Conversion locale", systemImage: "film") }
+            } header: { Label("Conversion", systemImage: "film") }
             Section {
                 Text("Les MKV doivent être stables pendant 10 secondes et ne plus être ouverts en écriture. Pour une copie susceptible de longues pauses, utilisez .part puis renommez en .mkv à la fin.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -200,11 +200,14 @@ struct SettingsView: View {
                 panel.title = title
                 if FileManager.default.fileExists(atPath: path.wrappedValue) { panel.directoryURL = URL(fileURLWithPath: path.wrappedValue) }
                 if panel.runModal() == .OK, let url = panel.url {
-                    // Watched folder and cache stay on this Mac: refuse the server immediately.
-                    if LocalPathPolicy.isOnThisMac(url.path) { path.wrappedValue = url.path; serviceError = nil }
-                    else { serviceError = "\(url.path) est sur le serveur ou un volume externe. Le dossier surveillé et le cache doivent être sur ce Mac : seul le MP4 validé est envoyé au serveur." }
+                    path.wrappedValue = url.path; serviceError = nil
                 }
                 }
+            }
+            if let advice = LocalPathPolicy.performanceWarning(path.wrappedValue) {
+                Label(advice, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
