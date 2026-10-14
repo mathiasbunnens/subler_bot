@@ -203,15 +203,41 @@ public actor SublerService {
 
 public enum MetadataMatching {
     internal static func normalized(_ title: String) -> String {
-        title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
-            .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: " ")
+        let folded = title.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .replacingOccurrences(of: "&", with: " and ")
+            .replacingOccurrences(of: "['’ʼ]", with: "", options: .regularExpression)
+        var words: [String] = []
+        for word in folded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter({ !$0.isEmpty }) {
+            // Release names also spell possessives as separate tokens (Clancy s).
+            if word == "s", !words.isEmpty { words[words.count - 1] += word }
+            else { words.append(word) }
+        }
+        return words.joined(separator: " ")
+    }
+
+    private static let descriptors: Set<String> = ["core", "multi", "vff", "vf2", "vfq", "vostfr", "truefrench", "french", "4klight", "web", "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "h264", "h265", "hevc", "hdr", "hdr10", "dv", "eac3", "ac3", "aac", "dts", "atmos", "10", "bits", "10bits"]
+
+    private static func isDescriptor(_ word: String) -> Bool {
+        descriptors.contains(word) || word.range(of: "^[0-9]+[pi]$", options: .regularExpression) != nil
     }
 
     public static func best(sourceName: String, candidates: [MetadataCandidate]) -> MetadataCandidate? {
         let stem = (sourceName as NSString).deletingPathExtension
-        guard let regex = try? NSRegularExpression(pattern: "(?<![0-9])(?:18|19|20|21)[0-9]{2}(?![0-9])") else { return nil }
+        // Explicit year tokens only: 2160p / 2160i are resolutions, not years.
+        guard let regex = try? NSRegularExpression(pattern: "(?i)(?<![a-z0-9])(?:18|19|20|21)[0-9]{2}(?![a-z0-9])") else { return nil }
         let years = regex.matches(in: stem, range: NSRange(stem.startIndex..., in: stem))
-        guard years.count == 1, let range = Range(years[0].range, in: stem), let year = Int(stem[range]) else { return nil }
+        guard let first = years.first, let firstRange = Range(first.range, in: stem) else { return nil }
+        var range = firstRange
+        // A numeric title (2001, Blade Runner 2049) can precede the release year.
+        // Never reinterpret numbers in the technical suffix as release years,
+        // nor retry an earlier year merely because a provider result matches it.
+        for match in years.dropFirst() {
+            guard let next = Range(match.range, in: stem) else { return nil }
+            let between = normalized(String(stem[firstRange.upperBound..<next.lowerBound]))
+            if between.split(separator: " ").contains(where: { isDescriptor(String($0)) }) { break }
+            range = next
+        }
+        guard let year = Int(stem[range]) else { return nil }
         let prefix = String(stem[..<range.lowerBound])
         // A release can carry a localized title followed by its original title.
         // Match either explicit spelling, never a fuzzy substring or provider order.
@@ -230,10 +256,9 @@ public enum MetadataMatching {
             }
         }
         // Only strip known trailing release descriptors, not arbitrary title words.
-        let descriptors: Set<String> = ["core", "multi", "vff", "vf2", "vostfr", "truefrench", "french", "1080p", "720p", "2160p", "4klight", "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "h264", "h265", "hevc", "hdr", "hdr10", "dv"]
         var words = normalized(primary).split(separator: " ").map(String.init)
         titles.insert(words.joined(separator: " "))
-        while let last = words.last, descriptors.contains(last) { words.removeLast() }
+        while let last = words.last, isDescriptor(last) { words.removeLast() }
         titles.insert(words.joined(separator: " "))
         titles.remove("")
         let matches = candidates.filter { $0.year == year && titles.contains(normalized($0.title)) }
