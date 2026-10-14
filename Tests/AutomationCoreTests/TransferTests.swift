@@ -207,7 +207,7 @@ final class TransferTests: XCTestCase {
     func testLocalDirectoryCannotMasqueradeAsSMBMount() async throws {
         let (root, share, _) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         do {
-            _ = try await SMBService().mountedShare(configuration: .init(serverURL: "smb://fixture-invalid.invalid/\(UUID().uuidString)", expectedMountPath: share.path))
+            _ = try await SMBService().mountedShare(configuration: .init(serverURL: "smb://fixture-invalid.invalid/\(UUID().uuidString)", username: "fixture", expectedMountPath: share.path))
             XCTFail("Local directory accepted")
         } catch SMBError.unavailable {}
     }
