@@ -199,6 +199,7 @@ struct SettingsView: View {
                 let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
                 panel.title = title
                 if FileManager.default.fileExists(atPath: path.wrappedValue) { panel.directoryURL = URL(fileURLWithPath: path.wrappedValue) }
+                JobQueueService.activateForModal()
                 if panel.runModal() == .OK, let url = panel.url {
                     path.wrappedValue = url.path; serviceError = nil
                 }

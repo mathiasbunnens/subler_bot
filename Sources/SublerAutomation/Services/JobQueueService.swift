@@ -133,9 +133,22 @@ final class JobQueueService: ObservableObject {
         return value
     }
     func addMovies() {
-        let panel = NSOpenPanel(); panel.allowedContentTypes = [UTType(filenameExtension: "mkv") ?? .movie]
-        panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
-        if panel.runModal() == .OK { enqueue(panel.urls) }
+        // Opened from the menu-bar popup of an accessory (LSUIElement) app: the app is
+        // not active, so a panel shown directly stays inactive (greyed sidebar such as
+        // Téléchargements, ignored clicks). Let the button's event finish, then
+        // activate the app and present the panel as the key window.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            Self.activateForModal()
+            let panel = NSOpenPanel(); panel.allowedContentTypes = [UTType(filenameExtension: "mkv") ?? .movie]
+            panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
+            panel.title = "Ajouter des films (MKV)"
+            if panel.runModal() == .OK { self.enqueue(panel.urls) }
+        }
+    }
+    /// Panels and alerts started from the menu need the app active to receive clicks.
+    static func activateForModal() {
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
     func enqueue(_ urls: [URL]) { enqueue(urls, explicit: true) }
     private func enqueue(_ urls: [URL], explicit: Bool) {
@@ -485,6 +498,7 @@ final class JobQueueService: ObservableObject {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Annuler")
         alert.addButton(withTitle: "Supprimer de la liste")
+        Self.activateForModal()
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         // Modal alerts run a nested event loop: revalidate eligibility and persistence after confirmation.
         guard !fatalPersistenceError else {
@@ -523,6 +537,7 @@ final class JobQueueService: ObservableObject {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Annuler")
         alert.addButton(withTitle: "Remplacer et conserver une sauvegarde")
+        Self.activateForModal()
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         replacements.insert(id); retry(id)
     }
