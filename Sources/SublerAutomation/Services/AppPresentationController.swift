@@ -55,6 +55,9 @@ final class AppPresentationController {
 
 @MainActor
 final class AppPresentationDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        FinderServiceProvider.shared.register()
+    }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         AppPresentationController.shared.showMainWindow()
         return true

@@ -504,6 +504,11 @@ final class JobQueueService: ObservableObject {
         worker?.cancel()
     }
     func requestNotifications() { notifications.requestPermission() }
+    /// Informational notice (never written to the error-only `message`).
+    func announce(_ text: String) {
+        store?.log("Finder : \(text)")
+        notifications.send(key: "finder-" + UUID().uuidString, text: text, enabled: settings.notifications)
+    }
     private func setProgress(_ sample: TransferProgress) { progress = sample }
     func openSource() { NSWorkspace.shared.open(URL(fileURLWithPath: settings.sourcePath)) }
     func openLogs() { NSWorkspace.shared.open(AppSettings.file.deletingLastPathComponent().appendingPathComponent("automation.log")) }
