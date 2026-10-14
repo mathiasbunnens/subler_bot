@@ -140,7 +140,18 @@ struct MenuBarView: View {
             HStack(spacing: 0) {
                 metric(queue.jobs.filter { $0.status == .pending }.count, title: "En attente", color: .primary)
                 Divider().frame(height: 28)
-                metric(queue.jobs.filter { $0.status == .completed }.count, title: "Terminés", color: .primary)
+                metric(queue.batch.completed, title: "Terminés", color: .primary)
+                    .overlay(alignment: .topLeading) {
+                        Button { queue.resetBatchCounter() } label: {
+                            Image(systemName: "arrow.counterclockwise").font(.system(size: 9, weight: .semibold))
+                                .frame(width: 16, height: 16).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        .disabled(queue.batch.completed == 0)
+                        .help("Remettre le compteur à zéro (l’historique est conservé). Il repart aussi à zéro au lancement d’un nouveau lot.")
+                        .accessibilityLabel("Remettre à zéro le compteur des films terminés")
+                        .offset(x: 4, y: -4)
+                    }
                 Divider().frame(height: 28)
                 metric(interventions.count, title: "À vérifier", color: interventions.isEmpty ? .secondary : .orange)
             }
