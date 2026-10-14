@@ -133,16 +133,22 @@ public actor TransferService {
                 let old = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
                 oldFile = old; oldFileInfo = try attributes(fd)
                 try checkEntry(parent: oldDirectoryFD, name: finalName, descriptor: fd)
-                let sourceHash = try await digest(input, mount: mount, rootFD: rootFD, directoryFD: oldDirectoryFD, movieName: movieName, verify: verify)
-                guard expectedDigest == nil || sourceHash.map({ String(format: "%02x", $0) }).joined() == expectedDigest else { throw TransferError.integrity }
-                let oldHash = try await digest(old, mount: mount, rootFD: rootFD, directoryFD: oldDirectoryFD, movieName: movieName, verify: verify)
-                try Task.checkCancellation(); try await verify(); try mount.revalidate(descriptor: rootFD)
-                try checkEntry(parent: rootFD, name: movieName, descriptor: oldDirectoryFD)
-                try checkEntry(parent: oldDirectoryFD, name: finalName, descriptor: fd)
-                guard stable(sourceInfo, try attributes(inputFD)), stable(oldFileInfo!, try attributes(fd)) else { throw TransferError.integrity }
-                if sourceHash == oldHash {
-                    await progress(.init(bytesCopied: sourceInfo.st_size, totalBytes: sourceInfo.st_size, bytesPerSecond: 0))
-                    return final
+                // A size mismatch already disproves byte equality. Do not scan
+                // either file just to reach the same conflict/replacement decision.
+                // Replacement still hashes the copied source stream against the
+                // validated digest and fully rereads the owned remote descriptor.
+                if oldFileInfo!.st_size == sourceInfo.st_size {
+                    let sourceHash = try await digest(input, mount: mount, rootFD: rootFD, directoryFD: oldDirectoryFD, movieName: movieName, verify: verify)
+                    guard expectedDigest == nil || sourceHash.map({ String(format: "%02x", $0) }).joined() == expectedDigest else { throw TransferError.integrity }
+                    let oldHash = try await digest(old, mount: mount, rootFD: rootFD, directoryFD: oldDirectoryFD, movieName: movieName, verify: verify)
+                    try Task.checkCancellation(); try await verify(); try mount.revalidate(descriptor: rootFD)
+                    try checkEntry(parent: rootFD, name: movieName, descriptor: oldDirectoryFD)
+                    try checkEntry(parent: oldDirectoryFD, name: finalName, descriptor: fd)
+                    guard stable(sourceInfo, try attributes(inputFD)), stable(oldFileInfo!, try attributes(fd)) else { throw TransferError.integrity }
+                    if sourceHash == oldHash {
+                        await progress(.init(bytesCopied: sourceInfo.st_size, totalBytes: sourceInfo.st_size, bytesPerSecond: 0))
+                        return final
+                    }
                 }
             }
             guard replaceExisting else { throw TransferError.conflict(final) }

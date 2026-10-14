@@ -100,6 +100,19 @@ final class SublerServiceTests: XCTestCase {
         XCTAssertNil(MetadataMatching.best(sourceName: "Amelie.2001.mkv", candidates: [candidate, candidate]))
         XCTAssertNil(MetadataMatching.best(sourceName: "Not.Amelie.2001.mkv", candidates: [candidate]))
     }
+    func testBestRecognizesBilingualReleaseName() {
+        let candidate = MetadataCandidate(index: 3, title: "Spider-Man: Brand New Day", year: 2026, raw: "Movie: Spider-Man: Brand New Day (2026)")
+        let filename = "Spider-Man  Un jour nouveau (Spider-Man Brand.New Day).CORE.2026.Multi.VFF.4Klight.HDR10+.DV.WEBRip.x265.⚡XRS-LazerTeam⚡.mkv"
+        XCTAssertEqual(MetadataMatching.best(sourceName: filename, candidates: [candidate]), candidate)
+        XCTAssertNil(MetadataMatching.best(sourceName: filename, candidates: [candidate, candidate]))
+        XCTAssertNil(MetadataMatching.best(sourceName: filename, candidates: [MetadataCandidate(index: 1, title: candidate.title, year: 2025, raw: "")]))
+    }
+
+    func testBestPreservesTitleEndingWithReleaseWord() {
+        let candidate = MetadataCandidate(index: 1, title: "The Core", year: 2003, raw: "Movie: The Core (2003)")
+        XCTAssertEqual(MetadataMatching.best(sourceName: "The.Core.2003.1080p.mkv", candidates: [candidate]), candidate)
+    }
+
     func testCandidateParsingKeepsOriginalOneBasedIndexAndRequiresMovieYear() {
         let result = MetadataMatching.parse("Movie: Amélie (2001)", index: 4)
         XCTAssertEqual(result?.title, "Amélie")

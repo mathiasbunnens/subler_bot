@@ -37,6 +37,7 @@ public struct MovieJob: Codable, Identifiable, Sendable {
     }
     public mutating func recover() {
         // Never infer conversion success from file existence after a crash.
+        if status == .pending && needsSelection { status = .paused }
         switch status {
         case .completed, .failed, .paused, .pending: break
         case .waitingForServer, .transferring: status = validated ? .waitingForServer : .pending

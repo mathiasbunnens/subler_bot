@@ -16,7 +16,7 @@ public enum SMBError: LocalizedError {
         switch self {
         case .unavailable: return "The configured SMB share is not mounted."
         case .invalidConfiguration: return "Invalid SMB configuration (use a password-free SMB share URL)."
-        case .mountFailed(let code): return "SMB reconnect failed (\(code)); check saved Keychain credentials."
+        case .mountFailed(let code): return "Connexion SMB impossible (\(code)). Vérifiez le serveur et les identifiants, puis utilisez Connecter… pour réessayer."
         }
     }
 }
@@ -97,14 +97,18 @@ public actor SMBService {
         }
         throw SMBError.unavailable
     }
-    public func reconnect(configuration: SMBConfiguration) async throws -> VerifiedMount {
+    nonisolated static func openOptions(allowAuthenticationUI: Bool) -> NSMutableDictionary {
+        NSMutableDictionary(dictionary: ["UIOption": allowAuthenticationUI ? "AllowUI" : "NoUI"])
+    }
+
+    public func reconnect(configuration: SMBConfiguration, allowAuthenticationUI: Bool = false) async throws -> VerifiedMount {
         let url = try Self.validate(configuration)
         if let mounted = try? mountedShare(configuration: configuration) { return mounted }
         try Task.checkCancellation()
-        // NetAuth consults saved Keychain credentials. No password, UI, forced session,
-        // unmount or manually-created /Volumes directory. Do not block MainActor.
+        // NetAuth owns credentials and the optional native authentication dialog.
+        // Never receive a password, force a session, unmount or create /Volumes paths.
         let status = await Task.detached(priority: .utility) {
-            let options = NSMutableDictionary(dictionary: ["UIOption": "NoUI"])
+            let options = Self.openOptions(allowAuthenticationUI: allowAuthenticationUI)
             let mountOptions = NSMutableDictionary(dictionary: ["SoftMount": true, "AllowSubMounts": false])
             var points: Unmanaged<CFArray>?
             let result = NetFSMountURLSync(url as CFURL, nil, configuration.username as CFString, nil, options, mountOptions, &points)

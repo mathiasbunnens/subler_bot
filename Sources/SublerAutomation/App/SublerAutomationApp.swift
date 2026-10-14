@@ -17,13 +17,19 @@ private enum InstanceLock {
 @main
 struct SublerAutomationApp: App {
     @StateObject private var queue: JobQueueService
+    @NSApplicationDelegateAdaptor(AppPresentationDelegate.self) private var appDelegate
     init() {
         InstanceLock.acquire()
-        _queue = StateObject(wrappedValue: JobQueueService())
-        NSApplication.shared.setActivationPolicy(.accessory)
+        let queue = JobQueueService()
+        _queue = StateObject(wrappedValue: queue)
+        NSApplication.shared.setActivationPolicy(queue.settings.presentationMode == .normal ? .regular : .accessory)
+        AppPresentationController.shared.bind(queue)
     }
     var body: some Scene {
-        MenuBarExtra("Subler Automation", systemImage: queue.symbol) { MenuBarView(queue: queue) }
+        MenuBarExtra(isInserted: Binding(
+            get: { queue.settings.presentationMode == .menuBar },
+            set: { _ in } // Insertion is derived only from validated, saved settings.
+        )) { MenuBarView(queue: queue) } label: { MenuBarStatusLabel(queue: queue) }
             .menuBarExtraStyle(.window)
         Settings { SettingsView(queue: queue) }
     }

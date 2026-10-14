@@ -7,6 +7,11 @@ private actor ProgressLog {
     func append(_ value: TransferProgress) { samples.append(value) }
 }
 
+private actor VerificationCounter {
+    var count = 0
+    func check() { count += 1 }
+}
+
 private actor VerificationState {
     var lost = false
     func check() throws { if lost { throw SMBError.unavailable } }
@@ -14,6 +19,74 @@ private actor VerificationState {
 }
 
 final class TransferTests: XCTestCase {
+    func testDirectorySizeConflictRefusesWithoutRedundantDigestReads() async throws {
+        let (root, share, source) = try fixture()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let directory = share.appendingPathComponent("Movie")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let old = Data([0xAB]), final = directory.appendingPathComponent("Movie.mp4")
+        try old.write(to: final)
+        let checks = VerificationCounter()
+        do {
+            _ = try await TransferService(directoryPublication: true).copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: UUID(), verify: { await checks.check() }, progress: { _ in
+                XCTFail("A known size conflict must not copy or verify bytes")
+            })
+            XCTFail("Different-size destination accepted")
+        } catch TransferError.conflict { }
+        let count = await checks.count
+        XCTAssertEqual(count, 1, "Size inequality already disproves equality: no local/remote digest scans needed")
+        XCTAssertEqual(try Data(contentsOf: final), old)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: share.path), ["Movie"])
+        XCTAssertEqual(try Data(contentsOf: source).count, 2_500_000)
+    }
+
+    func testDifferentSizeDirectoryReplacementRetainsFullIntegrityAndCancellationChecks() async throws {
+        // Size inequality skips only the old-file equality probe, never proof of
+        // newly copied bytes or checks required before replacing the old folder.
+        for failure in ["digest", "corruption", "source-mutation", "cancellation", "mount-loss"] {
+            let (root, share, source) = try fixture()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let directory = share.appendingPathComponent("Movie")
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            let old = Data([0xAB]), final = directory.appendingPathComponent("Movie.mp4")
+            try old.write(to: final)
+            let service = TransferService(directoryPublication: true), job = UUID()
+            let state = VerificationState()
+            let expected = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
+            let task = Task {
+                try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, expectedDigest: failure == "digest" ? "wrong" : expected, verify: { try await state.check() }, progress: { sample in
+                    guard sample.verificationBytes == 0 else { return }
+                    switch failure {
+                    case "corruption":
+                        let stage = try! FileManager.default.contentsOfDirectory(at: share, includingPropertiesForKeys: nil).first { $0.pathExtension == "staging" }!
+                        let file = try! FileHandle(forWritingTo: stage.appendingPathComponent("Movie.mp4"))
+                        try! file.write(contentsOf: Data([0xFF])); try! file.close()
+                    case "source-mutation":
+                        let file = try! FileHandle(forWritingTo: source)
+                        try! file.write(contentsOf: Data([0xFF])); try! file.close()
+                    case "cancellation": withUnsafeCurrentTask { $0?.cancel() }
+                    case "mount-loss": await state.lose()
+                    default: break
+                    }
+                })
+            }
+            do {
+                _ = try await task.value
+                XCTFail("Unsafe replacement accepted: \(failure)")
+            } catch TransferError.integrity {
+                XCTAssertTrue(["digest", "corruption", "source-mutation"].contains(failure))
+            } catch is CancellationError {
+                XCTAssertEqual(failure, "cancellation")
+            } catch SMBError.unavailable {
+                XCTAssertEqual(failure, "mount-loss")
+            }
+            XCTAssertEqual(try Data(contentsOf: final), old, failure)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: source.path), failure)
+            let backup = await service.preservedBackup(jobID: job)
+            XCTAssertNil(backup, "Failure before publication must not move original: \(failure)")
+        }
+    }
+
     func testDirectoryPublicationRejectsCorruptionDuringSingleVerification() async throws {
         let (root, share, source) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }

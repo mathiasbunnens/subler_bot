@@ -9,7 +9,7 @@ import time
 
 project = Path(__file__).resolve().parent.parent
 executable = Path(os.environ.get("SUBLER_BUILD_APP", str(project / "dist/Subler Automation.app"))) / "Contents/MacOS/SublerAutomation"
-scratch = Path(os.environ.get("TMPDIR", str(Path.home() / ".hermes/cache/scratch")))
+scratch = Path(os.environ.get("SUBLER_BUILD_SCRATCH", str(Path.home() / ".hermes/cache/scratch"))).resolve()
 scratch.mkdir(parents=True, exist_ok=True)
 root = Path(tempfile.mkdtemp(prefix="subler-app-smoke-", dir=scratch))
 source = root / "Source"
@@ -30,13 +30,19 @@ log = (root / "process.log").open("w")
 def launch():
     return subprocess.Popen([str(executable)], env=env, stdout=log, stderr=log)
 
+def read_state():
+    state = json.loads((root / "jobs.json").read_text())
+    assert isinstance(state, dict) and state["version"] == 1
+    assert isinstance(state["dismissedFingerprints"], list)
+    return state
+
 def wait_queue(predicate):
     deadline = time.monotonic() + 20
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(f"App exited: {process.returncode}; see {root}/process.log")
         try:
-            jobs = json.loads((root / "jobs.json").read_text())
+            jobs = read_state()["jobs"]
             if predicate(jobs):
                 return jobs
         except (OSError, json.JSONDecodeError):
@@ -47,17 +53,19 @@ def wait_queue(predicate):
 try:
     process = launch()
     jobs = wait_queue(lambda j: len(j) == 1)
-    assert jobs[0]["sourcePath"] == str(fixture)
+    assert jobs[0]["sourcePath"] == str(fixture), f"Expected {str(fixture)!r}, got {jobs[0]['sourcePath']!r}; evidence: {root}"
     assert jobs[0]["status"] == "pending"
     second = launch()
     assert second.wait(timeout=10) == 0, "Second instance did not refuse the lock"
     assert process.poll() is None, "Second instance stopped the original app"
     time.sleep(6)
-    assert len(json.loads((root / "jobs.json").read_text())) == 1, "Watcher duplicated its input"
+    assert len(read_state()["jobs"]) == 1, "Watcher duplicated its input"
     process.terminate()
     process.wait(timeout=10)
     jobs[0]["status"] = "converting"
-    (root / "jobs.json").write_text(json.dumps(jobs))
+    state = read_state()
+    state["jobs"] = jobs
+    (root / "jobs.json").write_text(json.dumps(state))
     process = launch()
     reopened = wait_queue(lambda j: len(j) == 1 and j[0]["status"] == "pending")
     assert reopened[0]["id"] == jobs[0]["id"]

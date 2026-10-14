@@ -1,11 +1,12 @@
 import Foundation
 import UserNotifications
+import AutomationCore
 
 @MainActor
 final class NotificationService {
     private var sent: [String: Date] = [:]
     func send(key: String, text: String, enabled: Bool) {
-        guard enabled, Bundle.main.bundleIdentifier != nil else { return }
+        guard enabled, ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil, Bundle.main.bundleIdentifier != nil else { return }
         if let previous = sent[key], Date().timeIntervalSince(previous) < 300 { return }
         sent[key] = Date()
         let center = UNUserNotificationCenter.current()
@@ -17,7 +18,21 @@ final class NotificationService {
         }
     }
     func requestPermission() {
-        guard Bundle.main.bundleIdentifier != nil else { return }
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        Task { _ = await permissionStatus(requestIfNeeded: true) }
+    }
+    func permissionStatus(requestIfNeeded: Bool) async -> PermissionDecision {
+        guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil else { return .granted }
+        guard Bundle.main.bundleIdentifier != nil else { return .undetermined }
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: return .granted
+        case .denied: return .denied
+        case .notDetermined:
+            guard requestIfNeeded else { return .undetermined }
+            do { return try await center.requestAuthorization(options: [.alert, .sound]) ? .granted : .denied }
+            catch { return .denied }
+        @unknown default: return .undetermined
+        }
     }
 }

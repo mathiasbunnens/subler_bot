@@ -11,6 +11,11 @@ final class JobQueueService: ObservableObject {
     @Published var progress: TransferProgress?
     @Published var message: String?
     @Published var candidates: [UUID: [MetadataCandidate]] = [:]
+    @Published private(set) var hasCompletedThisSession = false
+    let permissions: PermissionPreparationService
+    private var permissionObserver: AnyCancellable?
+    private var preparingPermissions = true
+    private var permissionTask: Task<Void, Never>?
     private let subler = SublerService()
     private let smb = SMBService()
     private let transfer = TransferService()
@@ -21,6 +26,7 @@ final class JobQueueService: ObservableObject {
     private var worker: Task<Void, Never>?
     private var ticking = false
     private var serverRetryAfter = Date.distantPast
+    private var authenticationGate = SMBAuthenticationGate()
     private var replacements = Set<UUID>()
     private var fatalPersistenceError = false
 
@@ -30,14 +36,15 @@ final class JobQueueService: ObservableObject {
         if currentJob?.status == .transferring { return "externaldrive.badge.wifi" }
         return activeID == nil ? "film" : "gearshape.2"
     }
-    init() {
+    init(permissions: PermissionPreparationService? = nil) {
+        self.permissions = permissions ?? .shared
         do {
             settings = try AppSettings.load()
             store = try QueueStore(root: AppSettings.file.deletingLastPathComponent())
             jobs = try store!.load()
             for index in jobs.indices { jobs[index].recover() }
             try store!.save(jobs)
-            try ensureLocalFolders()
+            if ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] != nil { try ensureLocalFolders() }
         } catch {
             fatalPersistenceError = true; settings.paused = true
             message = "Initialisation impossible : \(error.localizedDescription). Aucun état existant ne sera écrasé."
@@ -45,7 +52,37 @@ final class JobQueueService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
         }
-        Task { await tick() }
+        permissionObserver = self.permissions.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+        Task { await prepareStartupPermissions(); await tick() }
+    }
+    private func permissionScopes() -> [PermissionScope] {
+        var scopes = [PermissionScope(settings: settings)]
+        for value in jobs where value.status != .completed {
+            let scope = PermissionScope(settings: settings, job: value)
+            if !scopes.contains(scope) { scopes.append(scope) }
+        }
+        return scopes
+    }
+    private func prepareStartupPermissions() async {
+        defer { preparingPermissions = false }
+        guard !fatalPersistenceError else { return }
+        for scope in permissionScopes() {
+            await permissions.startup(scope)
+            guard permissions.isReady(for: scope) else { return }
+        }
+        do { try ensureLocalFolders() } catch { message = error.localizedDescription }
+    }
+    func preparePermissions() {
+        guard worker == nil, permissionTask == nil, !preparingPermissions else { return }
+        preparingPermissions = true
+        permissionTask = Task {
+            defer { preparingPermissions = false; permissionTask = nil }
+            for scope in permissionScopes() {
+                await permissions.prepare(scope)
+                guard permissions.isReady(for: scope) else { return }
+            }
+            do { try ensureLocalFolders() } catch { message = error.localizedDescription; return }
+        }
     }
     func ensureLocalFolders(_ configuration: AppSettings? = nil) throws {
         let configuration = configuration ?? settings
@@ -98,54 +135,101 @@ final class JobQueueService: ObservableObject {
         panel.allowsMultipleSelection = true; panel.canChooseDirectories = false
         if panel.runModal() == .OK { enqueue(panel.urls) }
     }
-    func enqueue(_ urls: [URL]) {
-        guard !fatalPersistenceError else { return }
+    func enqueue(_ urls: [URL]) { enqueue(urls, explicit: true) }
+    private func enqueue(_ urls: [URL], explicit: Bool) {
+        guard !fatalPersistenceError, let store else { return }
         for url in urls where url.pathExtension.lowercased() == "mkv" {
             do {
                 let fingerprint = try FileIdentity.fingerprint(url)
+                if !explicit {
+                    do { if try store.isDismissed(fingerprint: fingerprint) { continue } }
+                    catch {
+                        fatalPersistenceError = true; settings.paused = true
+                        throw error
+                    }
+                }
                 guard !jobs.contains(where: { $0.fingerprint == fingerprint || ($0.sourcePath == url.path && $0.status != .completed) }) else { continue }
-                jobs.append(MovieJob(sourcePath: url.path, fingerprint: fingerprint))
-                try persist()
-            } catch { message = "Ajout impossible : \(error.localizedDescription)" }
+                let updated = jobs + [MovieJob(sourcePath: url.path, fingerprint: fingerprint)]
+                do { try store.save(updated, explicitlyAddedFingerprints: explicit ? [fingerprint] : []) }
+                catch {
+                    fatalPersistenceError = true; settings.paused = true
+                    throw error
+                }
+                jobs = updated
+            } catch {
+                message = "Ajout impossible : \(error.localizedDescription)"
+                if fatalPersistenceError { return }
+            }
         }
     }
     private func scan() {
         guard settings.watchFolder else { return }
         do {
             let files = try FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: settings.sourcePath), includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
-            enqueue(files.filter { $0.pathExtension.lowercased() == "mkv" })
+            enqueue(files.filter { $0.pathExtension.lowercased() == "mkv" }, explicit: false)
         } catch { message = "Surveillance : \(error.localizedDescription)" }
     }
     private func ready(_ job: MovieJob) async -> Bool {
         let url = URL(fileURLWithPath: job.sourcePath)
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber, let date = attributes[.modificationDate] as? Date,
-              stability.observe(path: url.path, size: size.int64Value, modified: date, now: Date()) else { return false }
-        // Copies can pause: reject any currently open writable descriptor as well as requiring a quiet period.
-        return await Task.detached {
+              let before = try? FileIdentity.fingerprint(url) else {
+            stability.reset(path: url.path); return false
+        }
+        guard stability.observe(path: url.path, size: size.int64Value, modified: date, now: Date()) else { return false }
+        // Copies can pause: reject writable descriptors and any mutation during the lsof await.
+        let safe = await Task.detached {
             let process = Process(); process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
             process.arguments = ["-F", "a", "--", url.path]
             let pipe = Pipe(); process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
             do {
                 try process.run()
                 let output = pipe.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
-                let fields = String(decoding: output, as: UTF8.self).split(separator: "\n")
-                return !fields.contains("aw") && !fields.contains("au") && (process.terminationStatus == 0 || process.terminationStatus == 1)
+                return FileReadinessPolicy.isSafe(before: before, after: try? FileIdentity.fingerprint(url),
+                    lsofOutput: String(decoding: output, as: UTF8.self), exitStatus: process.terminationStatus)
             } catch { return false }
         }.value
+        if !safe { stability.reset(path: url.path) }
+        return safe
+    }
+    private func requireSourceForConversion(_ id: UUID) -> Bool {
+        guard let value = try? job(id) else { return false }
+        guard !value.validated else { return true }
+        do {
+            _ = try FileIdentity.fingerprint(URL(fileURLWithPath: value.sourcePath))
+            return true
+        } catch {
+            try? update(id) {
+                $0.status = .failed; $0.needsSelection = false
+                $0.error = "Le fichier source est introuvable ou inaccessible : \(value.sourcePath). Remettez le MKV à cet emplacement puis Réessayer, ou supprimez cette tâche de la liste. \(error.localizedDescription)"
+            }
+            candidates.removeValue(forKey: id)
+            stability.reset(path: value.sourcePath)
+            return false
+        }
     }
     func tick() async {
-        guard !ticking, !fatalPersistenceError else { return }
+        guard !ticking, !fatalPersistenceError, !preparingPermissions else { return }
         ticking = true; defer { ticking = false }
+        let scope = PermissionScope(settings: settings)
+        await permissions.recheck(scope)
+        guard permissions.isReady(for: scope), scope == PermissionScope(settings: settings) else { return }
         scan()
         guard worker == nil, !settings.paused else { return }
-        for value in jobs where value.status == .pending {
+        for value in jobs where value.status == .pending && !value.needsSelection {
+            let jobScope = PermissionScope(settings: settings, job: value)
+            await permissions.recheck(jobScope)
+            guard permissions.isReady(for: jobScope) else { return }
+            guard requireSourceForConversion(value.id) else { continue }
             if await ready(value) {
                 guard !settings.paused, !fatalPersistenceError, worker == nil, (try? job(value.id).status) == .pending else { return }
                 start(value.id); return
             }
         }
         if Date() >= serverRetryAfter, let waiting = jobs.first(where: { $0.status == .waitingForServer }) {
+            let jobScope = PermissionScope(settings: settings, job: waiting)
+            await permissions.recheck(jobScope)
+            guard permissions.isReady(for: jobScope), !settings.paused, worker == nil else { return }
             start(waiting.id)
         }
     }
@@ -167,6 +251,9 @@ final class JobQueueService: ObservableObject {
         var openedDocument: SublerDocument?
         do {
             var value = try job(id)
+            let permissionScope = PermissionScope(settings: runSettings, job: value)
+            await permissions.recheck(permissionScope)
+            guard permissions.isReady(for: permissionScope) else { return }
             let source = URL(fileURLWithPath: value.sourcePath)
             if !value.validated {
                 if value.localPath != nil, try FileIdentity.fingerprint(source) != value.fingerprint {
@@ -234,11 +321,27 @@ final class JobQueueService: ObservableObject {
             guard let localPath = value.localPath, let workRoot = value.workRoot, let digest = value.validatedDigest else { throw UserFacingError("MP4 local ou preuve de validation absente. Transfert refusé.") }
             let configuration = value.smbConfiguration ?? runSettings.smb
             let mount: VerifiedMount
-            do { mount = try await smb.reconnect(configuration: configuration) }
+            do {
+                do { mount = try await smb.reconnect(configuration: configuration) }
+                catch {
+                    try Task.checkCancellation()
+                    guard case SMBError.mountFailed = error,
+                          authenticationGate.begin(job: try job(id), configuration: configuration, shareIsMounted: false) else { throw error }
+                    try update(id) { $0.error = "Connexion au serveur : renseignez vos identifiants dans la fenêtre macOS." }
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                    mount = try await smb.reconnect(configuration: configuration, allowAuthenticationUI: true)
+                }
+            }
+            catch is CancellationError { throw CancellationError() }
             catch {
                 serverRetryAfter = Date().addingTimeInterval(60)
                 try update(id) { $0.status = .waitingForServer; $0.error = "Serveur indisponible : \(error.localizedDescription). MP4 conservé localement." }
                 notify(id, "Serveur indisponible. Le MP4 reste sur ce Mac.")
+                return
+            }
+            await permissions.recheck(permissionScope)
+            guard permissions.isReady(for: permissionScope) else {
+                try update(id) { $0.status = .waitingForServer; $0.error = "Préparez l’accès au partage monté dans Réglages → Autorisations. Le MP4 reste sur ce Mac." }
                 return
             }
             _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
@@ -254,6 +357,7 @@ final class JobQueueService: ObservableObject {
             })
             let backup = await transfer.preservedBackup(jobID: id)
             try update(id) { $0.status = .completed; $0.destinationPath = destination.path; $0.backupPath = backup?.path; $0.error = nil; $0.conflict = false }
+            hasCompletedThisSession = true
             notify(id, "\(value.displayName) est disponible sur votre serveur.")
             if let backup { store?.log("\(id): ancien MP4 conservé dans \(backup.path)") }
             if value.cleanupAfterTransfer == true {
@@ -285,14 +389,53 @@ final class JobQueueService: ObservableObject {
         }
     }
     func select(_ candidate: MetadataCandidate, for id: UUID) {
+        guard activeID != id, requireSourceForConversion(id) else { return }
         try? update(id) { $0.title = candidate.title; $0.year = candidate.year; $0.candidateIndex = candidate.index; $0.candidateRaw = candidate.raw; $0.needsSelection = false; $0.status = .pending; $0.error = nil }
         Task { await tick() }
     }
+    func connectServer(for id: UUID) {
+        guard worker == nil, let value = try? job(id), value.validated, value.status == .waitingForServer else { return }
+        authenticationGate.allowRetry(configuration: value.smbConfiguration ?? settings.smb)
+        retry(id)
+    }
     func retry(_ id: UUID) {
-        guard activeID != id else { return }
+        guard activeID != id, requireSourceForConversion(id) else { return }
         serverRetryAfter = .distantPast
-        try? update(id) { $0.status = $0.validated ? .waitingForServer : .pending; $0.error = nil; $0.conflict = false }
+        try? update(id) { $0.status = $0.validated ? .waitingForServer : .pending; $0.error = nil; $0.conflict = false; $0.needsSelection = false }
         Task { await tick() }
+    }
+    func removeIntervention(_ id: UUID) {
+        guard !fatalPersistenceError, let store else {
+            message = "Suppression de la liste impossible : persistance indisponible."; return
+        }
+        do { _ = try InterventionRemovalPolicy.validate(id, jobs: jobs, activeID: activeID) }
+        catch { message = error.localizedDescription; return }
+        guard let value = try? job(id) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Supprimer \(value.displayName) de la liste ?"
+        alert.informativeText = "Seule cette tâche sera retirée de la liste. Le MKV source, les MP4 locaux, les fichiers sur le serveur et la file Subler seront intégralement conservés. La surveillance ne rajoutera pas ce MKV tant qu’il reste inchangé, même après redémarrage. Pour le traiter à nouveau, modifiez le fichier ou utilisez Ajouter des MKV."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Annuler")
+        alert.addButton(withTitle: "Supprimer de la liste")
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        // Modal alerts run a nested event loop: revalidate eligibility and persistence after confirmation.
+        guard !fatalPersistenceError else {
+            message = "Suppression de la liste impossible : persistance indisponible."; return
+        }
+        do { _ = try InterventionRemovalPolicy.validate(id, jobs: jobs, activeID: activeID) }
+        catch { message = error.localizedDescription; return }
+        do {
+            let remaining = try store.removeIntervention(id, jobs: jobs, activeID: activeID)
+            jobs = remaining
+            candidates.removeValue(forKey: id); replacements.remove(id)
+            stability.reset(path: value.sourcePath)
+            message = nil
+            store.log("\(id): tâche retirée de la liste ; fichiers et file Subler conservés.")
+        } catch {
+            // Never publish the removal or resume scanning after an uncertain persistence result.
+            fatalPersistenceError = true; settings.paused = true
+            message = "Suppression de la liste impossible : \(error.localizedDescription). La tâche reste affichée ; aucun fichier ni élément Subler n’a été supprimé."
+        }
     }
     func ignore(_ id: UUID) {
         guard activeID != id else { return }
