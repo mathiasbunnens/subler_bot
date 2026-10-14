@@ -62,9 +62,15 @@ import AutomationCore
             let button = buttons[4]
             if step == 3 {
                 guard let competitor = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first else { preconditionFailure("Terminal focus competitor unavailable") }
-                precondition(competitor.activate(options: [.activateIgnoringOtherApps]))
+                // macOS may refuse a programmatic activation: that is an environment
+                // limit of this step, not a Settings focus failure.
+                guard competitor.activate(options: [.activateIgnoringOtherApps]) else {
+                    print("EXTERNAL_FOCUS_INTERRUPTED: Terminal refused programmatic activation"); exit(2)
+                }
                 await settle()
-                precondition(!NSApp.isActive, "Competing app did not take focus")
+                guard !NSApp.isActive else {
+                    print("EXTERNAL_FOCUS_INTERRUPTED: competing app did not take focus"); exit(2)
+                }
                 print("EXTERNAL_FOCUS_PRECONDITION: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown")")
             }
             button.performClick(nil)

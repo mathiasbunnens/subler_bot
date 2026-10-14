@@ -23,6 +23,6 @@ run(['swiftc', '-emit-library', '-emit-module', '-module-name', 'AutomationCore'
 run(['swiftc', '-parse-as-library', '-I', str(root), '-L', str(root), '-lAutomationCore',
      '-Xlinker', '-rpath', '-Xlinker', str(root),
      str(project / 'Sources/SublerAutomation/Models/AppSettings.swift'),
-     str(project / 'scripts/presentation-settings-test.swift'), '-o', str(root / 'SettingsTest')])
+     str(project / 'scripts/presentation-settings-test.swift'), str(project / 'scripts/harness-check.swift'), '-o', str(root / 'SettingsTest')])
 run([str(root / 'SettingsTest')])
 print('Evidence:', root)
