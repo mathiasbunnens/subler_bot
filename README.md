@@ -44,6 +44,8 @@ Serveur SMB : aucune adresse personnelle n’est intégrée. Si un partage SMB e
 
 ## Serveur et intégrité
 
+Seul le MP4 validé est envoyé au serveur. Le dossier surveillé, le cache de conversion et les MKV traités doivent être sur ce Mac : un dossier ou un MKV situé sur le serveur (ou sous /Volumes) est refusé dès le choix dans les réglages, l’ajout manuel ou le service Finder, pour éviter de relire puis renvoyer le film par le réseau. Si le film identifié existe déjà sur le partage monté (`<Titre (Année)>/<Titre (Année)>.mp4`), la conversion et l’envoi sont évités : la tâche passe « À vérifier » avec Ignorer ou Remplacer… (l’ancien fichier est alors conservé en sauvegarde).
+
 Exemple : `smb://192.168.1.100/Movies`, utilisateur `adminMat`, chemin attendu `/Volumes/Movies`.
 
 L’origine réelle smbfs est vérifiée, pas seulement le nom du dossier. Aucun dossier de remplacement n’est créé sous /Volumes. Les remontages essaient d’abord le Trousseau sans interface. Si cette tentative échoue pour un film validé en attente de transfert, macOS peut afficher sa fenêtre de connexion utilisateur/mot de passe. Aucune demande n’est lancée lorsque la file est inactive ou sans film prêt. Après un échec ou une annulation, les nouvelles tentatives automatiques restent silencieuses pour ce serveur/utilisateur pendant la session ; le bouton Connecter… permet de demander une nouvelle authentification. Une impossibilité de connexion laisse le MP4 local intact. Le montage et son origine sont relus avant tout transfert.

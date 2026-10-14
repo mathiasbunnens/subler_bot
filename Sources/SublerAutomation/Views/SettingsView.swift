@@ -199,7 +199,11 @@ struct SettingsView: View {
                 let panel = NSOpenPanel(); panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.canCreateDirectories = true
                 panel.title = title
                 if FileManager.default.fileExists(atPath: path.wrappedValue) { panel.directoryURL = URL(fileURLWithPath: path.wrappedValue) }
-                if panel.runModal() == .OK, let url = panel.url { path.wrappedValue = url.path }
+                if panel.runModal() == .OK, let url = panel.url {
+                    // Watched folder and cache stay on this Mac: refuse the server immediately.
+                    if LocalPathPolicy.isOnThisMac(url.path) { path.wrappedValue = url.path; serviceError = nil }
+                    else { serviceError = "\(url.path) est sur le serveur ou un volume externe. Le dossier surveillé et le cache doivent être sur ce Mac : seul le MP4 validé est envoyé au serveur." }
+                }
                 }
             }
         }
