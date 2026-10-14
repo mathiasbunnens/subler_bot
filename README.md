@@ -42,6 +42,10 @@ Le bundle est signé ad hoc, sans notarisation. macOS peut demander les autorisa
 
 Sans serveur configuré, les MP4 validés restent dans le dossier temporaire en attendant le transfert. Pour une copie longue, utilisez une extension `.part`, puis renommez en `.mkv` lorsque la copie est terminée.
 
+## Compteur « Terminés »
+
+Le compteur conserve les films terminés depuis la dernière remise à zéro manuelle, entre les lots et après redémarrage. Cliquez sur ↺ en haut à droite du compteur pour le remettre à zéro : l’historique des tâches reste intact. Les installations existantes commencent à zéro, sans recompter les anciens films.
+
 ## Vos fichiers restent protégés
 
 - Les MKV originaux ne sont jamais supprimés.

@@ -222,7 +222,7 @@ struct MenuBarView: View {
                         }
                         .buttonStyle(.borderless).foregroundStyle(.secondary)
                         .disabled(queue.batch.completed == 0)
-                        .help("Remettre le compteur à zéro (l’historique est conservé). Il repart aussi à zéro au lancement d’un nouveau lot.")
+                        .help("Remettre manuellement le compteur à zéro, sans supprimer l’historique. Il est conservé entre les lots et les lancements.")
                         .accessibilityLabel("Remettre à zéro le compteur des films terminés")
                         .offset(x: -4, y: -4)
                     }

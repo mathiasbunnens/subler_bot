@@ -25,14 +25,14 @@ final class BatchCounterTests: XCTestCase {
         XCTAssertEqual(counter.completed, 2)
     }
 
-    func testNewBatchAfterDrainResetsCount() {
+    func testNewBatchAfterDrainPreservesCount() {
         var counter = BatchCounter()
         counter.jobStarted(); counter.recordCompletion()
         counter.workerFinished(remaining: [job(.completed)])
         XCTAssertFalse(counter.isOpen)
-        XCTAssertEqual(counter.completed, 1, "Finished batch stays visible until the next one starts")
+        XCTAssertEqual(counter.completed, 1)
         counter.jobStarted()
-        XCTAssertEqual(counter.completed, 0)
+        XCTAssertEqual(counter.completed, 1)
     }
 
     func testInterventionsDoNotHoldBatchButServerWaitDoes() {

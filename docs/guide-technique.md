@@ -35,6 +35,12 @@ La conversion utilise par défaut le cache local `~/Movies/Subler Automation/Tem
 
 La pause arrête les nouveaux travaux après le film en cours ; elle ne stoppe jamais globalement la file de Subler. Un transfert peut être suspendu ; les copies originales et locales sont conservées. Quitter pendant une conversion ne tue pas Subler : au relancement, son élément de file est vérifié et ne sera jamais considéré terminé du seul fait qu’un MP4 existe.
 
+## Compteur « Terminés »
+
+Le compteur est conservé entre les lots et les lancements ; seule l’icône ↺ le remet à zéro manuellement, sans supprimer l’historique. Il ne dépend jamais des tâches `.completed` relues au démarrage. Le badge vert reste lié aux complétions de la session courante, pas à ce compteur.
+
+`completion-counter.json`, à côté de `jobs.json` et `settings.json`, contient le champ `completed`. Il est écrit atomiquement et relu pour vérification après chaque complétion durable (après l’enregistrement de l’état terminé) et chaque reset manuel. Un fichier absent vaut zéro, notamment pour les installations existantes. Un fichier illisible ou une écriture échouée produit une erreur visible et suspend les nouveaux traitements ; un fichier corrompu n’est jamais écrasé, même par le reset. Le compteur et l’historique ont deux écritures distinctes : une interruption entre elles peut laisser le compteur inférieur à l’historique, qui n’est volontairement jamais utilisé pour le recalculer.
+
 ## Première installation
 
 Sans réglages existants, l’application utilise :
@@ -69,6 +75,7 @@ Les MKV originaux ne sont jamais supprimés. Le nettoyage des MP4 locaux est dé
 - `jobs.json` : file persistante ; écritures atomiques.
 - `jobs.json` contient désormais une enveloppe versionnée avec `jobs` et `dismissedFingerprints` ; les anciennes files sous forme de tableau sont migrées sans perdre leurs tâches.
 - `settings.json` : réglages sans secrets.
+- `completion-counter.json` : compteur des films terminés depuis le dernier reset manuel, indépendant de l’historique.
 - `permission-grant.json` : configurations et chemins préparés, sans identifiants ; cet état ne remplace jamais les décisions d’autorisation de macOS.
 - `automation.log` : étapes et erreurs, chemins de fichiers uniquement.
 - `instance.lock` : évite deux moteurs concurrents.

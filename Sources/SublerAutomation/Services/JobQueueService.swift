@@ -23,6 +23,7 @@ final class JobQueueService: ObservableObject {
     private let transfer = TransferService()
     private let notifications = NotificationService()
     private var store: QueueStore?
+    private var completionCounterStore: CompletionCounterStore?
     private var stability = FileStabilityTracker()
     private var timer: Timer?
     private var worker: Task<Void, Never>?
@@ -44,6 +45,8 @@ final class JobQueueService: ObservableObject {
             settings = try AppSettings.load()
             storageAdvice = [settings.sourcePath, settings.temporaryPath].compactMap(LocalPathPolicy.performanceWarning).first
             store = try QueueStore(root: AppSettings.file.deletingLastPathComponent())
+            completionCounterStore = try CompletionCounterStore(root: AppSettings.file.deletingLastPathComponent())
+            batch = BatchCounter(completed: try completionCounterStore!.load())
             jobs = try store!.load()
             for index in jobs.indices { jobs[index].recover() }
             try store!.save(jobs)
@@ -421,7 +424,7 @@ final class JobQueueService: ObservableObject {
             let backup = await transfer.preservedBackup(jobID: id)
             try update(id) { $0.status = .completed; $0.destinationPath = destination.path; $0.backupPath = backup?.path; $0.error = nil; $0.conflict = false }
             hasCompletedThisSession = true
-            batch.recordCompletion()
+            persistCompletionCounter(reset: false)
             notify(id, "\(value.displayName) est disponible sur votre serveur.")
             if let backup { store?.log("\(id): ancien MP4 conservé dans \(backup.path)") }
             if value.cleanupAfterTransfer == true {
@@ -541,8 +544,24 @@ final class JobQueueService: ObservableObject {
         guard alert.runModal() == .alertSecondButtonReturn else { return }
         replacements.insert(id); retry(id)
     }
-    /// Resets only the visible batch count; completed history is kept.
-    func resetBatchCounter() { batch.reset() }
+    /// Only this explicit action resets the persistent count; job history is untouched.
+    func resetBatchCounter() { persistCompletionCounter(reset: true) }
+    private func persistCompletionCounter(reset: Bool) {
+        guard !fatalPersistenceError, let completionCounterStore else { return }
+        do {
+            if reset {
+                try completionCounterStore.reset()
+                batch.reset()
+            } else {
+                _ = try completionCounterStore.recordCompletion()
+                batch.recordCompletion()
+            }
+        } catch {
+            fatalPersistenceError = true; settings.paused = true
+            message = "Sauvegarde du compteur impossible : \(error.localizedDescription). Le compteur existant et l’historique sont conservés."
+            store?.log(message!)
+        }
+    }
     func cancelTransfer() {
         guard currentJob?.status == .transferring else { return }
         worker?.cancel()
