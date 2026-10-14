@@ -17,4 +17,23 @@
 <key>NSDownloadsFolderUsageDescription</key><string>Lecture des MKV du dossier Téléchargements choisi comme source et écriture des MP4 temporaires si vous y configurez le dossier de conversion.</string>
 <key>NSDocumentsFolderUsageDescription</key><string>Lecture des MKV du dossier Documents choisi comme source et écriture des MP4 temporaires si vous y configurez le dossier de conversion.</string>
 <key>NSNetworkVolumesUsageDescription</key><string>Transfert des MP4 vérifiés vers votre partage SMB Movies.</string>
+<key>NSServices</key>
+<array>
+	<dict>
+		<key>NSMenuItem</key><dict><key>default</key><string>Envoyer au serveur avec Subler Automation</string></dict>
+		<key>NSMessage</key><string>sendMoviesToServer</string>
+		<key>NSPortName</key><string>Subler Automation</string>
+		<key>NSRequiredContext</key><dict/>
+		<key>NSSendFileTypes</key><array><string>org.matroska.mkv</string><string>public.movie</string></array>
+	</dict>
+</array>
+<key>UTImportedTypeDeclarations</key>
+<array>
+	<dict>
+		<key>UTTypeIdentifier</key><string>org.matroska.mkv</string>
+		<key>UTTypeDescription</key><string>Vidéo Matroska</string>
+		<key>UTTypeConformsTo</key><array><string>public.movie</string></array>
+		<key>UTTypeTagSpecification</key><dict><key>public.filename-extension</key><array><string>mkv</string></array></dict>
+	</dict>
+</array>
 </dict></plist>

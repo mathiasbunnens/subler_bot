@@ -24,6 +24,7 @@ struct SublerAutomationApp: App {
         _queue = StateObject(wrappedValue: queue)
         NSApplication.shared.setActivationPolicy(queue.settings.presentationMode == .normal ? .regular : .accessory)
         AppPresentationController.shared.bind(queue)
+        FinderServiceProvider.shared.queue = queue
     }
     var body: some Scene {
         MenuBarExtra(isInserted: Binding(
