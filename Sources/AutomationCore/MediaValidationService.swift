@@ -10,6 +10,14 @@ public struct ValidatedMedia: Sendable {
 
 public enum MediaValidationService {
     public static func validate(source: URL, output: URL, expected: MetadataCandidate) async throws -> ValidatedMedia {
+        try await validate(source: source, output: output, title: expected.title, year: expected.year)
+    }
+
+    public static func validate(source: URL, output: URL, expected: ManualMovieMetadata) async throws -> ValidatedMedia {
+        try await validate(source: source, output: output, title: expected.title, year: expected.year)
+    }
+
+    private static func validate(source: URL, output: URL, title expectedTitle: String, year expectedYear: Int) async throws -> ValidatedMedia {
         let sourceAttributes = try? FileManager.default.attributesOfItem(atPath: source.path)
         let outputAttributes = try? FileManager.default.attributesOfItem(atPath: output.path)
         let sameInode = sourceAttributes?[.systemFileNumber] as? NSNumber != nil &&
@@ -60,11 +68,11 @@ public enum MediaValidationService {
         let uniqueTitles = Set(titles)
         let years = Set(dates.compactMap { Int($0.prefix(4)) })
         guard uniqueTitles.count == 1, let title = uniqueTitles.first,
-              MetadataMatching.normalized(title) == MetadataMatching.normalized(expected.title),
-              years == Set([expected.year]) else {
-            throw AutomationServiceError.message("Applied metadata does not match the selected candidate. Expected \(expected.title) (\(expected.year)); actual title tags: \(titles), release date tags: \(dates). Nothing should be transferred.")
+              MetadataMatching.normalized(title) == MetadataMatching.normalized(expectedTitle),
+              years == Set([expectedYear]) else {
+            throw AutomationServiceError.message("Les métadonnées écrites ne correspondent pas au titre et à l’année demandés. Attendu : \(expectedTitle) (\(expectedYear)) ; titres lus : \(titles), dates lues : \(dates). Transfert refusé.")
         }
-        return ValidatedMedia(title: title, year: expected.year, size: Int64(size))
+        return ValidatedMedia(title: title, year: expectedYear, size: Int64(size))
     }
 
     private static func sourceCounts(_ source: URL) async throws -> (video: Int, audio: Int, duration: Double) {

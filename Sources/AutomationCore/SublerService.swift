@@ -96,9 +96,19 @@ public actor SublerService {
     }
 
     public func convert(document: SublerDocument, candidate: MetadataCandidate, destination: URL) async throws {
+        try await convert(document: document, candidate: Optional(candidate), destination: destination)
+    }
+
+    /// No fabricated provider index: import/prettify/queue conversion remain mandatory.
+    public func convert(document: SublerDocument, manual: ManualMovieMetadata, destination: URL) async throws {
+        _ = try ManualMovieMetadata(title: manual.title, year: manual.year)
+        try await convert(document: document, candidate: nil, destination: destination)
+    }
+
+    private func convert(document: SublerDocument, candidate: MetadataCandidate?, destination: URL) async throws {
         guard !converting else { throw AutomationServiceError.message("Another conversion is already owned by this service.") }
         guard let source = sources[document.id] else { throw AutomationServiceError.message("Document is not owned by this service.") }
-        guard candidate.index > 0, destination.isFileURL, destination.pathExtension.lowercased() == "mp4",
+        guard (candidate == nil || candidate!.index > 0), destination.isFileURL, destination.pathExtension.lowercased() == "mp4",
               destination.standardizedFileURL != source.standardizedFileURL else {
             throw AutomationServiceError.message("Invalid metadata index or MP4 destination.")
         }
@@ -118,7 +128,7 @@ public actor SublerService {
                 repeat with queueIndex from 1 to count of queue items
                     if status of queue item queueIndex is ready or status of queue item queueIndex is working then error "Subler contains a foreign ready or working queue item. Leave it untouched and retry when the queue is idle."
                 end repeat
-                fetch and set metadata candidate \(candidate.index) into (document of window id \(document.id))
+                \(candidate.map { "fetch and set metadata candidate \($0.index) into (document of window id \(document.id))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
             end tell
             """, timeout: 300)
             // The native setter searches synchronously, then schedules its merge on the main queue.
@@ -162,7 +172,7 @@ public actor SublerService {
             }
             switch current.state {
             case "completed":
-                _ = try await MediaValidationService.validate(source: source, output: destination, expected: candidate)
+                if let candidate { _ = try await MediaValidationService.validate(source: source, output: destination, expected: candidate) }
                 return
             case "failed", "cancelled", "editing":
                 throw AutomationServiceError.message("Subler queue item \(current.id) is \(current.state): \(destination.path). See Subler's log for the conversion error.")

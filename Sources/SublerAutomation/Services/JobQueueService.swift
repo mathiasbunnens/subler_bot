@@ -268,7 +268,7 @@ final class JobQueueService: ObservableObject {
                 }
                 // Recover our exact Subler queue item, never process a foreign item or infer success from bytes alone.
                 var recovered = false
-                if let path = value.localPath, expected != nil, let state = try await subler.queueState(destination: URL(fileURLWithPath: path)) {
+                if let path = value.localPath, expected != nil || value.manualMetadata != nil, let state = try await subler.queueState(destination: URL(fileURLWithPath: path)) {
                     if state.lowercased().contains("working") || state.lowercased().contains("ready") {
                         try update(id) { $0.status = .paused; $0.error = "Conversion Subler interrompue ou encore active. Attendez la fin dans Subler, puis Réessayer." }
                         return
@@ -281,7 +281,7 @@ final class JobQueueService: ObservableObject {
                     openedDocument = document
                     try update(id) { $0.documentID = document.id; $0.status = .prettifying }
                     try update(id) { $0.status = .fetchingMetadata }
-                    let found = try await subler.candidates(document: document)
+                    let found = value.manualMetadata == nil ? try await subler.candidates(document: document) : []
                     candidates[id] = found
                     let chosen: MetadataCandidate?
                     if let expected {
@@ -289,7 +289,7 @@ final class JobQueueService: ObservableObject {
                         chosen = matching.count == 1 ? matching[0] : nil
                     }
                     else { chosen = MetadataMatching.best(sourceName: source.lastPathComponent, candidates: found) }
-                    guard let chosen else {
+                    guard chosen != nil || value.manualMetadata != nil else {
                         await subler.close(document: document)
                         openedDocument = nil
                         try update(id) { $0.status = .paused; $0.needsSelection = true; $0.error = found.isEmpty ? "Aucune métadonnée trouvée. Vérifiez le nom du MKV et le fournisseur dans Subler." : "Sélectionnez le film correspondant." }
@@ -304,14 +304,26 @@ final class JobQueueService: ObservableObject {
                     let sourceSize = (try FileManager.default.attributesOfItem(atPath: source.path)[.size] as? NSNumber)?.int64Value ?? 0
                     let space = try folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]).volumeAvailableCapacityForImportantUsage ?? 0
                     guard space > sourceSize + sourceSize / 2 else { await subler.close(document: document); throw UserFacingError("Espace disque local insuffisant (marge de sécurité 1,5 × MKV).") }
-                    try update(id) { $0.title = chosen.title; $0.year = chosen.year; $0.candidateIndex = chosen.index; $0.candidateRaw = chosen.raw; $0.localPath = output.path; $0.workRoot = runSettings.temporaryPath; $0.smbConfiguration = runSettings.smb; $0.cleanupAfterTransfer = runSettings.cleanupTemporary; $0.status = .converting; $0.needsSelection = false }
-                    try await subler.convert(document: document, candidate: chosen, destination: output)
+                    try update(id) { $0.title = value.manualMetadata?.title ?? chosen?.title; $0.year = value.manualMetadata?.year ?? chosen?.year; $0.candidateIndex = chosen?.index; $0.candidateRaw = chosen?.raw; $0.localPath = output.path; $0.workRoot = runSettings.temporaryPath; $0.smbConfiguration = runSettings.smb; $0.cleanupAfterTransfer = runSettings.cleanupTemporary; $0.status = .converting; $0.needsSelection = false }
+                    if let manual = value.manualMetadata {
+                        try await subler.convert(document: document, manual: manual, destination: output)
+                    } else if let chosen {
+                        try await subler.convert(document: document, candidate: chosen, destination: output)
+                    }
+                    await subler.close(document: document)
                     openedDocument = nil
                 }
                 value = try job(id)
-                guard let expected, let path = value.localPath else { throw UserFacingError("Métadonnées ou sortie manquantes.") }
+                guard let path = value.localPath else { throw UserFacingError("Sortie manquante.") }
                 try update(id) { $0.status = .validating }
-                let media = try await MediaValidationService.validate(source: source, output: URL(fileURLWithPath: path), expected: expected)
+                let media: ValidatedMedia
+                if let manual = value.manualMetadata {
+                    guard let root = value.workRoot else { throw OutputSafetyError.invalidOwnership }
+                    try await ManualMetadataWriter.apply(manual, source: source, output: URL(fileURLWithPath: path), root: URL(fileURLWithPath: root), jobID: id)
+                    media = try await MediaValidationService.validate(source: source, output: URL(fileURLWithPath: path), expected: manual)
+                } else if let expected {
+                    media = try await MediaValidationService.validate(source: source, output: URL(fileURLWithPath: path), expected: expected)
+                } else { throw UserFacingError("Titre et année requis. Transfert refusé.") }
                 guard try FileIdentity.fingerprint(source) == value.fingerprint else {
                     throw UserFacingError("Le MKV a été modifié pendant le traitement. MP4 non transféré ; réessayez lorsque la copie est terminée.")
                 }
@@ -393,9 +405,26 @@ final class JobQueueService: ObservableObject {
         }
     }
     func select(_ candidate: MetadataCandidate, for id: UUID) {
-        guard activeID != id, requireSourceForConversion(id) else { return }
-        try? update(id) { $0.title = candidate.title; $0.year = candidate.year; $0.candidateIndex = candidate.index; $0.candidateRaw = candidate.raw; $0.needsSelection = false; $0.status = .pending; $0.error = nil }
+        guard activeID != id, let value = try? job(id), !value.validated, value.localPath == nil, requireSourceForConversion(id) else { return }
+        try? update(id) { $0.manualMetadata = nil; $0.title = candidate.title; $0.year = candidate.year; $0.candidateIndex = candidate.index; $0.candidateRaw = candidate.raw; $0.needsSelection = false; $0.status = .pending; $0.error = nil }
         Task { await tick() }
+    }
+    /// Return an error to the form; no automatic retry on invalid input or failed persistence.
+    func applyManualMetadata(title: String, year: String, for id: UUID) -> String? {
+        do {
+            let metadata = try ManualMovieMetadata.parse(title: title, year: year)
+            let value = try job(id)
+            guard activeID != id, value.canEditMetadata else {
+                throw UserFacingError("La saisie est réservée aux tâches en intervention avant conversion. Une sortie existante doit être examinée avant de modifier son identité.")
+            }
+            guard requireSourceForConversion(id) else { return (try? job(id).error) ?? "MKV source inaccessible." }
+            var updated = try job(id)
+            try updated.applyManualMetadata(metadata, isActive: activeID == id)
+            try update(id) { $0 = updated }
+            candidates.removeValue(forKey: id)
+            Task { await tick() }
+            return nil
+        } catch { return error.localizedDescription }
     }
     func connectServer(for id: UUID) {
         guard worker == nil, let value = try? job(id), value.validated, value.status == .waitingForServer else { return }
