@@ -285,9 +285,10 @@ public actor TransferService {
             guard oldInfo!.st_mode & S_IFMT == S_IFREG, oldInfo!.st_nlink == 1 else { throw TransferError.unsafePath }
             try checkEntry(parent: directoryFD, name: finalName, descriptor: descriptor)
             if oldInfo!.st_size == total {
-                let sourceHash = try await digest(input, mount: mount, rootFD: rootFD, directoryFD: directoryFD, movieName: directoryName, verify: verify)
+                // Comparing with an existing server copy reads both files: report it as verification progress.
+                let sourceHash = try await digest(input, mount: mount, rootFD: rootFD, directoryFD: directoryFD, movieName: directoryName, verify: verify, progress: progress)
                 guard expectedDigest == nil || sourceHash.map({ String(format: "%02x", $0) }).joined() == expectedDigest else { throw TransferError.integrity }
-                let finalHash = try await digest(old, mount: mount, rootFD: rootFD, directoryFD: directoryFD, movieName: directoryName, verify: verify)
+                let finalHash = try await digest(old, mount: mount, rootFD: rootFD, directoryFD: directoryFD, movieName: directoryName, verify: verify, progress: progress)
                 try Task.checkCancellation(); try await verify(); try mount.revalidate(descriptor: rootFD)
                 try checkEntry(parent: rootFD, name: directoryName, descriptor: directoryFD)
                 try checkEntry(parent: directoryFD, name: finalName, descriptor: descriptor)
