@@ -1,6 +1,10 @@
 import Foundation
 import AutomationCore
 
+enum AppPresentationMode: String, Codable, CaseIterable {
+    case menuBar, normal
+}
+
 struct AppSettings: Codable, Equatable {
     var sourcePath = NSHomeDirectory() + "/Movies/Subler Automation/À convertir"
     var temporaryPath = NSHomeDirectory() + "/Movies/Subler Automation/Temp"
@@ -9,6 +13,31 @@ struct AppSettings: Codable, Equatable {
     var notifications = true
     var cleanupTemporary = false
     var paused = false
+    var presentationMode: AppPresentationMode = .menuBar
+
+    init() {}
+    func differsForEditing(from saved: Self) -> Bool {
+        var editable = self
+        editable.paused = saved.paused
+        return editable != saved
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case sourcePath, temporaryPath, smb, watchFolder, notifications, cleanupTemporary, paused, presentationMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sourcePath = try values.decode(String.self, forKey: .sourcePath)
+        temporaryPath = try values.decode(String.self, forKey: .temporaryPath)
+        smb = try values.decode(SMBConfiguration.self, forKey: .smb)
+        watchFolder = try values.decode(Bool.self, forKey: .watchFolder)
+        notifications = try values.decode(Bool.self, forKey: .notifications)
+        cleanupTemporary = try values.decode(Bool.self, forKey: .cleanupTemporary)
+        paused = try values.decode(Bool.self, forKey: .paused)
+        // Only the new field is optional: malformed existing data still fails safely.
+        presentationMode = try values.decodeIfPresent(AppPresentationMode.self, forKey: .presentationMode) ?? .menuBar
+    }
     static var file: URL {
         if let testRoot = ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] {
             return URL(fileURLWithPath: testRoot).appendingPathComponent("settings.json")

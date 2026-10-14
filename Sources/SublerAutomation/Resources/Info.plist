@@ -14,5 +14,7 @@
 <key>NSHighResolutionCapable</key><true/>
 <key>NSAppleEventsUsageDescription</key><string>Subler Automation contrôle Subler pour importer vos MKV, appliquer les métadonnées et convertir les films en MP4.</string>
 <key>NSMoviesFolderUsageDescription</key><string>Accès aux films à convertir et aux MP4 temporaires.</string>
+<key>NSDownloadsFolderUsageDescription</key><string>Lecture des MKV du dossier Téléchargements choisi comme source et écriture des MP4 temporaires si vous y configurez le dossier de conversion.</string>
+<key>NSDocumentsFolderUsageDescription</key><string>Lecture des MKV du dossier Documents choisi comme source et écriture des MP4 temporaires si vous y configurez le dossier de conversion.</string>
 <key>NSNetworkVolumesUsageDescription</key><string>Transfert des MP4 vérifiés vers votre partage SMB Movies.</string>
 </dict></plist>

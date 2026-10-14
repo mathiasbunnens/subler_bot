@@ -202,8 +202,31 @@ public enum MetadataMatching {
         guard let regex = try? NSRegularExpression(pattern: "(?<![0-9])(?:18|19|20|21)[0-9]{2}(?![0-9])") else { return nil }
         let years = regex.matches(in: stem, range: NSRange(stem.startIndex..., in: stem))
         guard years.count == 1, let range = Range(years[0].range, in: stem), let year = Int(stem[range]) else { return nil }
-        let title = normalized(String(stem[..<range.lowerBound]))
-        let matches = candidates.filter { $0.year == year && normalized($0.title) == title }
+        let prefix = String(stem[..<range.lowerBound])
+        // A release can carry a localized title followed by its original title.
+        // Match either explicit spelling, never a fuzzy substring or provider order.
+        var titles = Set<String>()
+        var primary = prefix
+        if let aliases = try? NSRegularExpression(pattern: "\\(([^()]*)\\)|\\[([^\\[\\]]*)\\]") {
+            for match in aliases.matches(in: prefix, range: NSRange(prefix.startIndex..., in: prefix)).reversed() {
+                for group in 1...2 where match.range(at: group).location != NSNotFound {
+                    if let aliasRange = Range(match.range(at: group), in: prefix) {
+                        titles.insert(normalized(String(prefix[aliasRange])))
+                    }
+                }
+                if let fullRange = Range(match.range, in: primary) {
+                    primary.replaceSubrange(fullRange, with: " ")
+                }
+            }
+        }
+        // Only strip known trailing release descriptors, not arbitrary title words.
+        let descriptors: Set<String> = ["core", "multi", "vff", "vf2", "vostfr", "truefrench", "french", "1080p", "720p", "2160p", "4klight", "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "h264", "h265", "hevc", "hdr", "hdr10", "dv"]
+        var words = normalized(primary).split(separator: " ").map(String.init)
+        titles.insert(words.joined(separator: " "))
+        while let last = words.last, descriptors.contains(last) { words.removeLast() }
+        titles.insert(words.joined(separator: " "))
+        titles.remove("")
+        let matches = candidates.filter { $0.year == year && titles.contains(normalized($0.title)) }
         return matches.count == 1 ? matches[0] : nil
     }
 
