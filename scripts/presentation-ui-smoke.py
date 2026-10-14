@@ -24,7 +24,7 @@ def run(args):
 run(['swiftc', '-emit-library', '-emit-module', '-module-name', 'AutomationCore',
      *map(str, (project / 'Sources/AutomationCore').glob('*.swift')),
      '-emit-module-path', str(root / 'AutomationCore.swiftmodule'), '-o', str(root / 'libAutomationCore.dylib')])
-files = [project / 'scripts/presentation-ui-smoke.swift']
+files = [project / 'scripts/presentation-ui-smoke.swift', project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 if focus_only:

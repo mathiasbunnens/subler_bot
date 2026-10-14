@@ -20,7 +20,7 @@ scratch.mkdir(parents=True, exist_ok=True)
 root = Path(tempfile.mkdtemp(prefix='subler-ui-layout-', dir=scratch))
 source = root / 'Sources/UISmoke'
 source.mkdir(parents=True)
-files = [project / 'scripts/ui-layout-smoke.swift']
+files = [project / 'scripts/ui-layout-smoke.swift', project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 for file in files:

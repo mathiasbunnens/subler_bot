@@ -31,7 +31,7 @@ source = source.replace('        InstanceLock.acquire()', '        PresentationS
 source = source.replace('        AppPresentationController.shared.bind(queue)', '        AppPresentationController.shared.bind(queue)\n        Task { @MainActor in await PresentationSettingsClick.run(queue) }')
 entrypoint = root / 'SublerAutomationApp.swift'
 entrypoint.write_text(source)
-files = [entrypoint, project / 'scripts/presentation-settings-click.swift']
+files = [entrypoint, project / 'scripts/presentation-settings-click.swift', project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 if '--baseline-settings-link' in sys.argv:

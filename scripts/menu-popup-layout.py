@@ -30,7 +30,7 @@ source = source.replace('        InstanceLock.acquire()', '        MenuPopupLayo
 source = source.replace('        AppPresentationController.shared.bind(queue)', '        AppPresentationController.shared.bind(queue)\n        Task { @MainActor in await MenuPopupLayout.run(queue) }')
 entrypoint = root / 'SublerAutomationApp.swift'
 entrypoint.write_text(source)
-files = [entrypoint, project / 'scripts/menu-popup-layout.swift']
+files = [entrypoint, project / 'scripts/menu-popup-layout.swift', project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 if sticky_height:

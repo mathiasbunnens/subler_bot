@@ -40,7 +40,7 @@ source = source.replace('        InstanceLock.acquire()', '        PresentationE
 source = source.replace('        AppPresentationController.shared.bind(queue)', '        AppPresentationController.shared.bind(queue)\n        Task { @MainActor in await PresentationEntrypointSmoke.run(queue) }')
 entrypoint = root / 'SublerAutomationApp.swift'
 entrypoint.write_text(source)
-files = [entrypoint, project / 'scripts/presentation-entrypoint-smoke.swift']
+files = [entrypoint, project / 'scripts/presentation-entrypoint-smoke.swift', project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 controller = project / 'Sources/SublerAutomation/Services/AppPresentationController.swift'
