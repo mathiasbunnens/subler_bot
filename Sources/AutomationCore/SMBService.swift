@@ -6,8 +6,57 @@ public struct SMBConfiguration: Codable, Equatable, Sendable {
     public var serverURL: String
     public var username: String
     public var expectedMountPath: String
-    public init(serverURL: String = "smb://192.168.1.100/Movies", username: String = "adminMat", expectedMountPath: String = "/Volumes/Movies") {
+    /// Empty by default: no personal server or account is baked into the app.
+    /// A first installation uses `firstLaunchDefault()` instead.
+    public init(serverURL: String = "", username: String = "", expectedMountPath: String = "") {
         self.serverURL = serverURL; self.username = username; self.expectedMountPath = expectedMountPath
+    }
+
+    /// A server address has been entered (it may still be unreachable).
+    public var isConfigured: Bool { !serverURL.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// The job's snapshot wins once a server exists; a film converted before any
+    /// server was configured uses the server entered since.
+    public static func effective(job: SMBConfiguration?, current: SMBConfiguration) -> SMBConfiguration {
+        if let job, job.isConfigured { return job }
+        return current
+    }
+
+    /// Builds a configuration from an existing smbfs mount, e.g.
+    /// `//alice@nas.local/Films` mounted on `/Volumes/Films`. Never contains a password.
+    public static func fromMount(origin: String, mountPoint: String, fallbackUser: String) -> SMBConfiguration? {
+        guard let parts = URLComponents(string: origin.hasPrefix("//") ? "smb:" + origin : origin),
+              parts.scheme?.lowercased() == "smb", let host = parts.host, !host.isEmpty else { return nil }
+        let shares = parts.path.split(separator: "/", omittingEmptySubsequences: true)
+        guard shares.count == 1 else { return nil }
+        var url = URLComponents()
+        url.scheme = "smb"; url.host = host; url.port = parts.port
+        url.path = "/" + String(shares[0])
+        guard let server = url.string else { return nil }
+        // Mount strings may carry "DOMAIN;user": keep only the account name.
+        let user = parts.user.flatMap { $0.split(separator: ";").last.map(String.init) }
+        return SMBConfiguration(serverURL: server, username: (user?.isEmpty == false ? user! : fallbackUser), expectedMountPath: mountPoint)
+    }
+
+    /// First installation: reuse an SMB share already mounted in the Finder, otherwise
+    /// leave the server empty (to configure in Réglages) with the macOS account name as user.
+    public static func firstLaunchDefault(userName: String = NSUserName()) -> SMBConfiguration {
+        for (origin, mountPoint) in mountedSMBShares() {
+            if let detected = fromMount(origin: origin, mountPoint: mountPoint, fallbackUser: userName) { return detected }
+        }
+        return SMBConfiguration(username: userName)
+    }
+
+    /// Metadata only (getmntinfo MNT_NOWAIT): never mounts or prompts.
+    public static func mountedSMBShares() -> [(origin: String, mountPoint: String)] {
+        var entries: UnsafeMutablePointer<statfs>?
+        let count = getmntinfo(&entries, MNT_NOWAIT)
+        guard count > 0, let entries else { return [] }
+        return (0..<Int(count)).compactMap { index in
+            let info = entries[index]
+            guard mountString(info.f_fstypename) == "smbfs" else { return nil }
+            return (mountString(info.f_mntfromname), mountString(info.f_mntonname))
+        }
     }
 }
 public enum SMBError: LocalizedError {

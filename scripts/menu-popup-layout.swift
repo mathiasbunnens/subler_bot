@@ -9,6 +9,8 @@ import AutomationCore
         let root = ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"]!
         precondition(root.hasPrefix(NSHomeDirectory() + "/.hermes/cache/scratch/"))
         var settings = AppSettings()
+        // Layout fixtures model a configured server (no "Serveur non configuré" card).
+        settings.smb = SMBConfiguration(serverURL: "smb://fixture.invalid/Movies", username: "fixture", expectedMountPath: "/Volumes/Fixture")
         settings.sourcePath = root + "/Source"; settings.temporaryPath = root + "/Temp"
         settings.paused = true; settings.watchFolder = false; settings.notifications = false
         settings.presentationMode = .menuBar

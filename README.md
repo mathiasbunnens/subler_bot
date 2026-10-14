@@ -33,9 +33,18 @@ La conversion reste locale dans `~/Movies/Subler Automation/Temp/<identifiant>/`
 
 La pause arrête les nouveaux travaux après le film en cours ; elle ne stoppe jamais globalement la file de Subler. Un transfert peut être suspendu ; les copies originales et locales sont conservées. Quitter pendant une conversion ne tue pas Subler : au relancement, son élément de file est vérifié et ne sera jamais considéré terminé du seul fait qu’un MP4 existe.
 
+## Première installation
+
+Sans réglages existants, l’application utilise :
+- dossier source surveillé : `~/Movies/Subler Automation/À convertir` ;
+- dossier de conversion (MP4 temporaires) : `~/Movies/Subler Automation/Temp` ;
+- les deux sont créés automatiquement au premier démarrage, après les autorisations.
+
+Serveur SMB : aucune adresse personnelle n’est intégrée. Si un partage SMB est déjà monté dans le Finder (⌘K), il est repris automatiquement (adresse, utilisateur, point de montage). Sinon l’adresse reste vide et l’utilisateur proposé est le compte macOS ; le menu affiche « Serveur non configuré ». Les films sont alors convertis et validés, puis gardés sur ce Mac jusqu’à ce que le serveur soit renseigné dans Réglages → Serveur (bouton « Détecter le partage monté »). Les réglages déjà enregistrés ne sont jamais modifiés.
+
 ## Serveur et intégrité
 
-Par défaut : `smb://192.168.1.100/Movies`, utilisateur `adminMat`, chemin attendu `/Volumes/Movies`.
+Exemple : `smb://192.168.1.100/Movies`, utilisateur `adminMat`, chemin attendu `/Volumes/Movies`.
 
 L’origine réelle smbfs est vérifiée, pas seulement le nom du dossier. Aucun dossier de remplacement n’est créé sous /Volumes. Les remontages essaient d’abord le Trousseau sans interface. Si cette tentative échoue pour un film validé en attente de transfert, macOS peut afficher sa fenêtre de connexion utilisateur/mot de passe. Aucune demande n’est lancée lorsque la file est inactive ou sans film prêt. Après un échec ou une annulation, les nouvelles tentatives automatiques restent silencieuses pour ce serveur/utilisateur pendant la session ; le bouton Connecter… permet de demander une nouvelle authentification. Une impossibilité de connexion laisse le MP4 local intact. Le montage et son origine sont relus avant tout transfert.
 

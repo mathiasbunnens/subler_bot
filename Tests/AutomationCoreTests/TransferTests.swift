@@ -119,7 +119,7 @@ final class TransferTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["SUBLER_TEST_SMB"] == "1" else { throw XCTSkip("Opt-in SMB Unicode fixture") }
         let (root, _, source) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        let service = SMBService(), config = SMBConfiguration()
+        let service = SMBService(), config = SMBConfiguration.firstLaunchDefault()
         let mount = try await service.mountedShare(configuration: config)
         let name = "Subler Automation QA Amélie " + UUID().uuidString
         let final = try await TransferService().copy(source: source, mount: mount, movieName: name, jobID: UUID(), verify: {
@@ -500,7 +500,7 @@ final class TransferTests: XCTestCase {
         guard ProcessInfo.processInfo.environment["SUBLER_TEST_SMB"] == "1" else { throw XCTSkip("Opt-in real SMB fixture transfer") }
         let (root, _, source) = try fixture()
         defer { try? FileManager.default.removeItem(at: root) }
-        let service = SMBService(), configuration = SMBConfiguration()
+        let service = SMBService(), configuration = SMBConfiguration.firstLaunchDefault()
         let mount = try await service.mountedShare(configuration: configuration)
         let name = "Subler Automation QA " + UUID().uuidString
         let directory = mount.root.appendingPathComponent(name)

@@ -57,10 +57,14 @@ public enum PermissionPreparationState: Equatable, Sendable {
         guard [scope.sourcePath, scope.temporaryPath].allSatisfy({ $0.hasPrefix("/") && !$0.contains("\0") && !$0.split(separator: "/").contains("..") && !$0.hasPrefix("/Volumes/") }) else {
             state = .blocked("Choisissez des dossiers locaux avec des chemins absolus."); return
         }
-        guard let server = URLComponents(string: scope.serverURL), server.scheme?.lowercased() == "smb", server.host != nil,
-              server.user == nil, server.password == nil, server.query == nil, server.fragment == nil,
-              server.path.split(separator: "/").count == 1 else {
-            state = .blocked("Adresse SMB attendue sans identifiants intégrés : smb://serveur/partage."); return
+        // An empty server means "not configured yet" (first installation): conversion
+        // may proceed and validated films wait locally until a share is configured.
+        if !scope.serverURL.isEmpty {
+            guard let server = URLComponents(string: scope.serverURL), server.scheme?.lowercased() == "smb", server.host != nil,
+                  server.user == nil, server.password == nil, server.query == nil, server.fragment == nil,
+                  server.path.split(separator: "/").count == 1 else {
+                state = .blocked("Adresse SMB attendue sans identifiants intégrés : smb://serveur/partage."); return
+            }
         }
         do {
             let previous = try operations.load()

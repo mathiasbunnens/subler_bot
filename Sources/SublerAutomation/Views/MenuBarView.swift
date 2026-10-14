@@ -153,6 +153,18 @@ struct MenuBarView: View {
                     }
                 }
             }
+            if !queue.settings.smb.isConfigured {
+                card {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("Serveur non configuré", systemImage: "externaldrive.badge.questionmark")
+                            .font(.subheadline).bold()
+                        Text("Les films sont convertis puis gardés sur ce Mac jusqu’à ce que le partage SMB soit renseigné.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Button("Configurer le serveur…") { openSettings(); SettingsWindowFocus.request() }
+                            .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+                    }
+                }
+            }
             if let message = queue.message {
                 card {
                     Label {

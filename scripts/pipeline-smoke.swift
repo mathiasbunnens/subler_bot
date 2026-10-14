@@ -9,7 +9,7 @@ struct PipelineSmoke {
         var generatedRemote: URL?
         do {
             guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] != nil else { throw UserFacingError("An isolated test root is mandatory.") }
-            let server = SMBService(), configuration = SMBConfiguration()
+            let server = SMBService(), configuration = SMBConfiguration.firstLaunchDefault()
             let mount = try await server.mountedShare(configuration: configuration)
             let expectedDirectory = mount.root.appendingPathComponent("Amélie (2001)")
             guard !FileManager.default.fileExists(atPath: expectedDirectory.path) else {
