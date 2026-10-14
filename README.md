@@ -38,7 +38,7 @@ Le bundle est signé ad hoc, sans notarisation. macOS peut demander les autorisa
 
 1. Dans **Réglages → Autorisations**, préparez le contrôle de Subler et l’accès aux dossiers.
 2. Dans **Dossiers** et **Serveur**, choisissez la source, le cache temporaire et votre partage SMB. Le stockage local est conseillé, mais les emplacements réseau montés sont autorisés.
-3. Déposez vos MKV dans `~/Movies/Subler Automation/À convertir/`, ou cliquez sur **Ajouter…**, puis **Démarrer**.
+3. Déposez vos MKV dans `~/.../À convertir/`, ou cliquez sur **Ajouter…**, ou clique droit sur un MKV **Envoyer au serveur avec Subler Automation**, puis **Démarrer**.
 
 Sans serveur configuré, les MP4 validés restent dans le dossier temporaire en attendant le transfert. Pour une copie longue, utilisez une extension `.part`, puis renommez en `.mkv` lorsque la copie est terminée.
 
