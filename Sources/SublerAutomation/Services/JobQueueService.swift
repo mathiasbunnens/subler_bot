@@ -361,6 +361,12 @@ final class JobQueueService: ObservableObject {
             }
             _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
             try Task.checkCancellation()
+            if value.posterPath.map({ !PosterExtractor.isOwned($0, workRoot: workRoot, jobID: id) }) ?? true {
+                // Artwork is optional: a film without a cover shows the placeholder.
+                let folder = URL(fileURLWithPath: workRoot).appendingPathComponent(id.uuidString)
+                let poster = await PosterExtractor.extract(from: URL(fileURLWithPath: localPath), jobFolder: folder)
+                try update(id) { $0.posterPath = poster?.path }
+            }
             try update(id) { $0.status = .transferring; $0.error = nil }
             let server = smb
             let replace = replacements.remove(id) != nil
@@ -406,7 +412,7 @@ final class JobQueueService: ObservableObject {
     }
     func select(_ candidate: MetadataCandidate, for id: UUID) {
         guard activeID != id, let value = try? job(id), !value.validated, value.localPath == nil, requireSourceForConversion(id) else { return }
-        try? update(id) { $0.manualMetadata = nil; $0.title = candidate.title; $0.year = candidate.year; $0.candidateIndex = candidate.index; $0.candidateRaw = candidate.raw; $0.needsSelection = false; $0.status = .pending; $0.error = nil }
+        try? update(id) { $0.manualMetadata = nil; $0.posterPath = nil; $0.title = candidate.title; $0.year = candidate.year; $0.candidateIndex = candidate.index; $0.candidateRaw = candidate.raw; $0.needsSelection = false; $0.status = .pending; $0.error = nil }
         Task { await tick() }
     }
     /// Return an error to the form; no automatic retry on invalid input or failed persistence.

@@ -187,8 +187,21 @@ struct MenuBarView: View {
                         Text("Pause ensuite").font(.caption2).foregroundStyle(Color.orange)
                     }
                 }
-                Text(job.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(2).textSelection(.enabled)
-                metadataWarning(job)
+                if [.waitingForServer, .transferring].contains(job.status) {
+                    // Poster of the film being sent; keyed by job so a previous cover never lingers.
+                    HStack(alignment: .top, spacing: 10) {
+                        PosterView(path: job.posterPath.flatMap {
+                            PosterExtractor.isOwned($0, workRoot: job.workRoot, jobID: job.id) ? $0 : nil
+                        }).id(job.id)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(job.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(3).textSelection(.enabled)
+                            metadataWarning(job)
+                        }
+                    }
+                } else {
+                    Text(job.displayName).font(.system(size: 14, weight: .semibold)).lineLimit(2).textSelection(.enabled)
+                    metadataWarning(job)
+                }
                 if let progress = queue.progress { TransferProgressView(sample: progress) }
                 else {
                     HStack(spacing: 6) {

@@ -26,6 +26,8 @@ public struct MovieJob: Codable, Identifiable, Sendable {
     public var smbConfiguration: SMBConfiguration?
     public var cleanupAfterTransfer: Bool?
     public var backupPath: String?
+    /// Local cover copied from the validated MP4 into this job's own work folder.
+    public var posterPath: String?
     public var error: String?
     public var needsSelection = false
     public var conflict = false
@@ -45,7 +47,7 @@ public struct MovieJob: Codable, Identifiable, Sendable {
         }
         manualMetadata = metadata; title = metadata.title; year = metadata.year
         candidateIndex = nil; candidateRaw = nil; needsSelection = false
-        status = .pending; error = nil; validated = false; validatedDigest = nil
+        status = .pending; error = nil; validated = false; validatedDigest = nil; posterPath = nil
     }
     public var metadataWarning: String? {
         if manualMetadata != nil { return "Métadonnées saisies manuellement — titre et année uniquement ; affiche et détails fournisseur non garantis." }
