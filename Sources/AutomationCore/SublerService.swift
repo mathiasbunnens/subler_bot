@@ -258,12 +258,28 @@ public enum MetadataMatching {
         // Only strip known trailing release descriptors, not arbitrary title words.
         var words = normalized(primary).split(separator: " ").map(String.init)
         titles.insert(words.joined(separator: " "))
-        while let last = words.last, isDescriptor(last) { words.removeLast() }
+        // Release tags are the trailing descriptors before the year plus everything after it.
+        var tags = normalized(String(stem[range.upperBound...])).split(separator: " ").map(String.init)
+        while let last = words.last, isDescriptor(last) { tags.append(words.removeLast()) }
         titles.insert(words.joined(separator: " "))
         titles.remove("")
         let matches = candidates.filter { $0.year == year && titles.contains(normalized($0.title)) }
-        return matches.count == 1 ? matches[0] : nil
+        if !matches.isEmpty { return matches.count == 1 ? matches[0] : nil }
+        // Localized-title rule. Subler searches with this release name (the imported file's
+        // name) and answers with original titles (its default provider language is English),
+        // while French releases carry the French title: exact equality can never hold.
+        // Accept only when the release is explicitly French, has a title before its explicit
+        // year, no candidate spells the release title in another year, and EXACTLY ONE
+        // candidate shares that year. Never provider order, never among same-year candidates.
+        guard !titles.isEmpty,
+              tags.contains(where: frenchMarkers.contains),
+              !candidates.contains(where: { titles.contains(normalized($0.title)) }) else { return nil }
+        let sameYear = candidates.filter { $0.year == year }
+        return sameYear.count == 1 ? sameYear[0] : nil
     }
+
+    /// Release tags declaring French audio, which implies a French localized release title.
+    private static let frenchMarkers: Set<String> = ["vff", "vf2", "vfq", "vfi", "vf", "truefrench", "french"]
 
     public static func parse(_ raw: String, index: Int) -> MetadataCandidate? {
         guard index > 0, let regex = try? NSRegularExpression(pattern: "^Movie: (.+) \\(([0-9]{4})\\)$"),

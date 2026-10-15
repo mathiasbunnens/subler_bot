@@ -12,7 +12,7 @@ PLIST = ROOT / 'Sources/SublerAutomation/Resources/Info.plist'
 class VersionContracts(unittest.TestCase):
     def test_release_metadata(self):
         info = plistlib.loads(PLIST.read_bytes())
-        self.assertEqual(info['CFBundleShortVersionString'], '1.0.1')
+        self.assertEqual(info['CFBundleShortVersionString'], '1.0.2')
         self.assertGreater(int(info['CFBundleVersion']), 1)
 
     def test_shared_bundle_version_in_both_views(self):
@@ -20,7 +20,7 @@ class VersionContracts(unittest.TestCase):
             source = (ROOT / f'Sources/SublerAutomation/Views/{name}.swift').read_text()
             self.assertIn('Text(AppVersion.current.label)', source)
             self.assertIn('.help(AppVersion.current.details)', source)
-            self.assertNotIn('1.0.1', source)
+            self.assertNotIn('1.0.2', source)
             self.assertEqual(source.count('Text(AppVersion.current.label)'), 1)
             self.assertNotIn('.foregroundStyle(.tertiary)', source)
             if name == 'MenuBarView':

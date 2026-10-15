@@ -38,13 +38,13 @@ Le bundle est signé ad hoc, sans notarisation. macOS peut demander les autorisa
 
 La source unique est `Sources/SublerAutomation/Resources/Info.plist` :
 `CFBundleShortVersionString` pour la version publique (incrémenter le patch pour
-un correctif, par exemple 1.0.1 → 1.0.2), `CFBundleVersion` pour le build
-(entier strictement croissant à chaque nouvelle livraison, actuellement 2).
+un correctif, par exemple 1.0.2 → 1.0.3), `CFBundleVersion` pour le build
+(entier strictement croissant à chaque nouvelle livraison, actuellement 3).
 Modifier ces deux valeurs avant la livraison, puis relancer `./build.sh` ; aucun
 incrément automatique au lancement ni à chaque compilation. Le script copie ce
 plist tel quel dans le bundle signé, sans réutiliser un ancien binaire de `dist`.
 
-Le titre en haut du popover et des Réglages affiche « Subler Automation · v1.0.1 »,
+Le titre en haut du popover et des Réglages affiche « Subler Automation · v1.0.2 »,
 avec la version lue dans `Bundle.main`, sans pied de version en doublon ;
 l’infobulle donne aussi le build.
 Sans bundle (`swift run` / tests), le texte indique explicitement « développement

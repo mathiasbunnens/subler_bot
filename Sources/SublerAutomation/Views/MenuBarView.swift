@@ -439,7 +439,8 @@ struct MenuBarView: View {
     private func candidateRows(_ choices: [MetadataCandidate], for job: MovieJob) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Confirmer les métadonnées").font(.caption).bold()
-            Text("Plusieurs films possibles : choisissez le bon titre et l’année.")
+            Text(choices.count == 1 ? "Un seul film proposé : vérifiez le titre et l’année avant de le choisir."
+                : "Plusieurs films possibles : choisissez le bon titre et l’année.")
                 .font(.caption).foregroundStyle(.secondary)
             VStack(spacing: 4) {
                     ForEach(choices) { choice in

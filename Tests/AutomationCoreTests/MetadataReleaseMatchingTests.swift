@@ -12,7 +12,10 @@ final class MetadataReleaseMatchingTests: XCTestCase {
         XCTAssertEqual(MetadataMatching.best(sourceName: name, candidates: [movie]), movie)
         XCTAssertNil(MetadataMatching.best(sourceName: name, candidates: [movie, movie]))
         XCTAssertNil(MetadataMatching.best(sourceName: name, candidates: [candidate(movie.title, 2025)]))
-        XCTAssertNil(MetadataMatching.best(sourceName: name, candidates: [candidate("Super Mario Bros", 2026)]))
+        // Exact titles stay strict for a non-French release. A French-tagged release (VF2)
+        // would accept a lone same-year candidate under the documented localized-title rule.
+        XCTAssertNil(MetadataMatching.best(sourceName: name.replacingOccurrences(of: ".VF2", with: ""), candidates: [candidate("Super Mario Bros", 2026)]))
+        XCTAssertNil(MetadataMatching.best(sourceName: name, candidates: [candidate("Super Mario Bros", 2026), movie, movie]))
     }
 
     func testExactReportedJackRyanReleaseAndPossessiveSpellings() {
@@ -62,6 +65,37 @@ final class MetadataReleaseMatchingTests: XCTestCase {
         let movie = candidate("Tom & Jerry", 2026)
         XCTAssertEqual(MetadataMatching.best(sourceName: "Tom.and.Jerry.MULTI.VFQ.WEB.EAC3.Atmos.DV.HDR10+.10.bits.2026.mkv", candidates: [movie]), movie)
         XCTAssertEqual(MetadataMatching.best(sourceName: "Tom.&.Jerry.2026.mkv", candidates: [candidate("Tom and Jerry", 2026)]), candidate("Tom and Jerry", 2026))
+    }
+
+    // Subler searches with the release file name; this user's French releases carry the
+    // localized title while the provider answers with the original title.
+    func testReportedFrenchLocalizedReleasesAcceptTheSingleSameYearCandidate() {
+        let peaky = candidate("Peaky Blinders: The Immortal Man", 2026)
+        let peakyName = "Peaky Blinders L_Immortel 2026 MULTi VFF 1080p Web x264.mkv"
+        XCTAssertEqual(MetadataMatching.best(sourceName: peakyName, candidates: [peaky]), peaky)
+        let magic = candidate("Now You See Me: Now You Don't", 2025, index: 2)
+        let magicName = "Insaisissables 3 2025 MULTi VFF 2160p 10bit 4KLight BluRay x265.mkv"
+        XCTAssertEqual(MetadataMatching.best(sourceName: magicName, candidates: [candidate("Now You See Me", 2013), magic]), magic)
+    }
+
+    func testLocalizedRuleNeverGuessesAmongSameYearOrWrongYearCandidates() {
+        let peakyName = "Peaky Blinders L_Immortel 2026 MULTi VFF 1080p Web x264.mkv"
+        let peaky = candidate("Peaky Blinders: The Immortal Man", 2026)
+        // Two candidates of the release year: never pick by provider order.
+        XCTAssertNil(MetadataMatching.best(sourceName: peakyName, candidates: [peaky, candidate("Another Film", 2026, index: 2)]))
+        XCTAssertNil(MetadataMatching.best(sourceName: peakyName, candidates: [peaky, candidate(peaky.title, 2026, index: 2)]))
+        // Different year only.
+        XCTAssertNil(MetadataMatching.best(sourceName: peakyName, candidates: [candidate(peaky.title, 2025)]))
+        // No explicit year in the release name.
+        XCTAssertNil(MetadataMatching.best(sourceName: "Peaky Blinders L_Immortel MULTi VFF 1080p Web x264.mkv", candidates: [peaky]))
+        // Not a French-localized release: titles are expected to match exactly.
+        XCTAssertNil(MetadataMatching.best(sourceName: "Peaky Blinders L_Immortel 2026 1080p Web x264.mkv", candidates: [peaky]))
+        // A candidate spelling the release title exactly but in another year contradicts the release year.
+        XCTAssertNil(MetadataMatching.best(sourceName: "Amelie 2002 VFF 1080p.mkv", candidates: [candidate("Amélie", 2001), candidate("Other", 2002, index: 2)]))
+        // No title before the year.
+        XCTAssertNil(MetadataMatching.best(sourceName: "2026 MULTi VFF 1080p.mkv", candidates: [peaky]))
+        // A title word is not a release tag.
+        XCTAssertNil(MetadataMatching.best(sourceName: "The.French.Dispatch.2021.1080p.mkv", candidates: [candidate("Other", 2021)]))
     }
 
     func testExpandedDescriptorsPreserveUnstrippedTitlesAndAmbiguity() {
