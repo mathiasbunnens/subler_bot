@@ -21,6 +21,14 @@ class VersionContracts(unittest.TestCase):
             self.assertIn('Text(AppVersion.current.label)', source)
             self.assertIn('.help(AppVersion.current.details)', source)
             self.assertNotIn('1.0.1', source)
+            self.assertEqual(source.count('Text(AppVersion.current.label)'), 1)
+            self.assertNotIn('.foregroundStyle(.tertiary)', source)
+            if name == 'MenuBarView':
+                header = source.split('private var header: some View {', 1)[1].split('private var summary:', 1)[0]
+                self.assertIn('Text(AppVersion.current.label)', header)
+                self.assertNotIn('Text("Subler Automation")', source)
+            else:
+                self.assertLess(source.index('Text(AppVersion.current.label)'), source.index('TabView {'))
         core = (ROOT / 'Sources/AutomationCore/AppVersion.swift').read_text()
         self.assertIn('Bundle.main.infoDictionary', core)
         build = (ROOT / 'build.sh').read_text()

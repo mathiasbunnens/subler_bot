@@ -15,8 +15,8 @@ public struct AppVersion {
     }
 
     public var label: String {
-        guard let version else { return "Subler Automation — développement (hors bundle)" }
-        return "Subler Automation v\(version)"
+        guard let version else { return "Subler Automation · développement (hors bundle)" }
+        return "Subler Automation · v\(version)"
     }
 
     public var details: String {

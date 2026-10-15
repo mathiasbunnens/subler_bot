@@ -44,8 +44,9 @@ Modifier ces deux valeurs avant la livraison, puis relancer `./build.sh` ; aucun
 incrément automatique au lancement ni à chaque compilation. Le script copie ce
 plist tel quel dans le bundle signé, sans réutiliser un ancien binaire de `dist`.
 
-Le pied du popover et des Réglages affiche la version lue dans `Bundle.main`,
-en petit texte centré comme Quota Monitor ; l’infobulle donne aussi le build.
+Le titre en haut du popover et des Réglages affiche « Subler Automation · v1.0.1 »,
+avec la version lue dans `Bundle.main`, sans pied de version en doublon ;
+l’infobulle donne aussi le build.
 Sans bundle (`swift run` / tests), le texte indique explicitement « développement
 (hors bundle) », sans prétendre identifier l’application installée.
 Vérifier la cohérence avec `SUBLER_BUILD_APP="/chemin/vers/Subler Automation.app" python3 scripts/version-contract.py`

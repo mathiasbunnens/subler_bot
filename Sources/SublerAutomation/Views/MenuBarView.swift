@@ -106,10 +106,6 @@ struct MenuBarView: View {
             }
             Divider()
             footer
-            Text(AppVersion.current.label)
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .center)
-                .help(AppVersion.current.details)
         }
         .padding(14).frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)
@@ -201,7 +197,8 @@ struct MenuBarView: View {
         HStack(spacing: 8) {
             Image(systemName: "film.stack").font(.title3).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
-                Text("Subler Automation").font(.system(size: 14, weight: .semibold))
+                Text(AppVersion.current.label).font(.system(size: 14, weight: .semibold))
+                    .help(AppVersion.current.details)
                 Text("MKV → MP4 → SMB").font(.caption2).foregroundStyle(.secondary)
             }
             Spacer(minLength: 4)

@@ -60,6 +60,10 @@ struct SettingsView: View {
     private var hasChanges: Bool { draft.differsForEditing(from: queue.settings) }
     var body: some View {
         VStack(spacing: 0) {
+            Text(AppVersion.current.label)
+                .font(.headline)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                .help(AppVersion.current.details)
             TabView {
                 general.tabItem { Label("Général", systemImage: "gearshape") }
                 folders.tabItem { Label("Dossiers", systemImage: "folder") }
@@ -67,10 +71,7 @@ struct SettingsView: View {
                 PermissionSettingsView(permissions: queue.permissions, retry: { queue.preparePermissions() })
                     .tabItem { Label("Autorisations", systemImage: "checkmark.shield") }
             }
-            Text(AppVersion.current.label)
-                .font(.system(size: 10)).foregroundStyle(.tertiary)
-                .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 6)
-                .help(AppVersion.current.details)
+
             if let serviceError { Text(serviceError).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
             if let message = queue.message { Text(message).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
             if hasChanges {
