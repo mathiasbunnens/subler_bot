@@ -41,6 +41,7 @@ import AutomationCore
         try! settings.save()
         try! QueueStore(root: root).save([])
         NSApplication.shared.setActivationPolicy(.prohibited)
+        print("BUNDLE_VERSION: \(AppVersion.current.label) — \(AppVersion.current.details)")
         let queue = JobQueueService()
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 800_000_000)

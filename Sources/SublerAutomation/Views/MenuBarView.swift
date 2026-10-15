@@ -106,6 +106,10 @@ struct MenuBarView: View {
             }
             Divider()
             footer
+            Text(AppVersion.current.label)
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .help(AppVersion.current.details)
         }
         .padding(14).frame(width: 380)
         .fixedSize(horizontal: false, vertical: true)

@@ -33,7 +33,10 @@ run(['swiftc', '-parse-as-library', '-I', str(root), '-L', str(root), '-lAutomat
 app = root / 'RenderUI.app'
 (app / 'Contents/MacOS').mkdir(parents=True)
 shutil.copy2(root / 'RenderUI', app / 'Contents/MacOS/RenderUI')
+version_info = plistlib.loads((project / 'Sources/SublerAutomation/Resources/Info.plist').read_bytes())
 (app / 'Contents/Info.plist').write_bytes(plistlib.dumps({
+    'CFBundleShortVersionString': version_info['CFBundleShortVersionString'],
+    'CFBundleVersion': version_info['CFBundleVersion'],
     'CFBundleIdentifier': 'local.sublerautomation.' + root.name,
     'CFBundleExecutable': 'RenderUI', 'CFBundleName': 'Render UI',
     'CFBundlePackageType': 'APPL', 'LSUIElement': True, 'LSBackgroundOnly': True,

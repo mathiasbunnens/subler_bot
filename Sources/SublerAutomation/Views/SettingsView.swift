@@ -67,6 +67,10 @@ struct SettingsView: View {
                 PermissionSettingsView(permissions: queue.permissions, retry: { queue.preparePermissions() })
                     .tabItem { Label("Autorisations", systemImage: "checkmark.shield") }
             }
+            Text(AppVersion.current.label)
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .center).padding(.vertical, 6)
+                .help(AppVersion.current.details)
             if let serviceError { Text(serviceError).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
             if let message = queue.message { Text(message).font(.caption).foregroundStyle(.red).padding(.horizontal, 16) }
             if hasChanges {
