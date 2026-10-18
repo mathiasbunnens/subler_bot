@@ -68,6 +68,7 @@ struct SettingsView: View {
                 general.tabItem { Label("Général", systemImage: "gearshape") }
                 folders.tabItem { Label("Dossiers", systemImage: "folder") }
                 server.tabItem { Label("Serveur", systemImage: "externaldrive.badge.wifi") }
+                AppleTVPreparationView().tabItem { Label("Apple TV", systemImage: "appletv") }
                 PermissionSettingsView(permissions: queue.permissions, retry: { queue.preparePermissions() })
                     .tabItem { Label("Autorisations", systemImage: "checkmark.shield") }
             }

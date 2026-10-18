@@ -12,8 +12,8 @@ PLIST = ROOT / 'Sources/SublerAutomation/Resources/Info.plist'
 class VersionContracts(unittest.TestCase):
     def test_release_metadata(self):
         info = plistlib.loads(PLIST.read_bytes())
-        self.assertEqual(info['CFBundleShortVersionString'], '1.0.2')
-        self.assertGreater(int(info['CFBundleVersion']), 1)
+        self.assertEqual(info['CFBundleShortVersionString'], '1.1.0')
+        self.assertGreaterEqual(int(info['CFBundleVersion']), 4)
 
     def test_shared_bundle_version_in_both_views(self):
         for name in ['MenuBarView', 'SettingsView']:

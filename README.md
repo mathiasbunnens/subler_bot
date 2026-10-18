@@ -20,10 +20,23 @@ Une application native pour macOS qui pilote [Subler](https://subler.org/) et tr
 - Vérifie le MP4, puis le copie sur le serveur avec suivi du transfert et contrôle d’intégrité.
 - Classe les films sous `Titre (Année)/Titre (Année).mp4`.
 - Conserve la file après redémarrage et permet de réessayer les tâches en erreur.
+- Propose dans **Réglages → Apple TV** une préparation manuelle indépendante : copie vidéo sans perte si compatible, ou véritable encodage H.264 SDR avec VideoToolbox sur choix explicite. Vérifie des images avec le décodeur natif avant publication.
 
 ## Installation
 
-Prérequis : **macOS 14+**, les outils Swift/Xcode, **Subler** (version testée : 1.9.5) et **ffprobe** (`brew install ffmpeg`). La conversion est réalisée par Subler, pas par FFmpeg.
+Prérequis : **macOS 14+**, les outils Swift/Xcode, **Subler** (version testée : 1.9.5) et **ffprobe** (`brew install ffmpeg`). Le parcours automatique reste réalisé par Subler. L’outil manuel Apple TV utilise **FFmpeg et ffprobe**, installés séparément dans `/opt/homebrew/bin` ou `/usr/local/bin` ; aucun codec n’est installé dans Subler, aucun binaire FFmpeg n’est distribué avec l’application.
+
+### Préparer un MP4 autonome pour Apple TV
+
+Dans **Réglages → Apple TV**, choisissez un fichier puis consultez le diagnostic :
+
+- **Préserver la vidéo** (défaut) : remux H.264 compatible ou HEVC Main/Main 10 avec marquage `avc1`/`hvc1`. HEVC cible ici Apple TV 4K.
+- **Convertir pour Apple TV** : encodage matériel H.264 SDR avec perte, au maximum 1080p30, 8 Mbit/s ; audio non compatible converti en AAC stéréo. Accord explicite requis avant de démarrer.
+- HDR/HLG et Dolby Vision ne sont jamais réencodés. Dolby Vision est refusé ; HDR10 n’est admissible en copie que si les métadonnées requises sont exposées et retrouvées en sortie. Ce contrôle conservateur peut refuser un film pourtant lisible ailleurs.
+
+Choisissez une nouvelle destination MP4 locale. L’original et les fichiers existants ne sont jamais remplacés. Le résultat n’est pas envoyé automatiquement au serveur. La validation de décodage macOS n’est pas une certification sur votre Apple TV physique.
+
+[Profils, diagnostic, limites HDR et dépendances](docs/apple-tv-preparation.md)
 
 Depuis le dossier du projet :
 
@@ -39,12 +52,12 @@ Le bundle est signé ad hoc, sans notarisation. macOS peut demander les autorisa
 La source unique est `Sources/SublerAutomation/Resources/Info.plist` :
 `CFBundleShortVersionString` pour la version publique (incrémenter le patch pour
 un correctif, par exemple 1.0.2 → 1.0.3), `CFBundleVersion` pour le build
-(entier strictement croissant à chaque nouvelle livraison, actuellement 3).
+(entier strictement croissant à chaque nouvelle livraison, actuellement 4).
 Modifier ces deux valeurs avant la livraison, puis relancer `./build.sh` ; aucun
 incrément automatique au lancement ni à chaque compilation. Le script copie ce
 plist tel quel dans le bundle signé, sans réutiliser un ancien binaire de `dist`.
 
-Le titre en haut du popover et des Réglages affiche « Subler Automation · v1.0.2 »,
+Le titre en haut du popover et des Réglages affiche « Subler Automation · v1.1.0 »,
 avec la version lue dans `Bundle.main`, sans pied de version en doublon ;
 l’infobulle donne aussi le build.
 Sans bundle (`swift run` / tests), le texte indique explicitement « développement

@@ -76,4 +76,13 @@ final class AppPresentationDelegate: NSObject, NSApplicationDelegate {
         return true
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard AppleTVPreparationModel.shared.isBusy else { return .terminateNow }
+        Task { @MainActor in
+            await AppleTVPreparationModel.shared.cancelAndWait()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
 }
