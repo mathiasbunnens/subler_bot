@@ -13,18 +13,19 @@ final class AppleTVPreparationModel: ObservableObject {
     @Published private(set) var status = "Choisissez un MKV ou MP4 à analyser."
     @Published private(set) var fraction = 0.0
     @Published private(set) var isBusy = false
-    @Published var mode: AppleTVMode = .preserve { didSet { acknowledged = false } }
+    @Published var mode: AppleTVMode = .preserve { didSet { acknowledged = false; allowDynamicHDRLoss = false } }
     @Published var allowTrackLoss = false { didSet { acknowledged = false } }
+    @Published var allowDynamicHDRLoss = false { didSet { acknowledged = false } }
     @Published var acknowledged = false
     private var task: Task<Void, Never>?
 
     var plan: AppleTVPlan? {
         guard let media else { return nil }
-        return try? AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss)
+        return try? AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss, allowDynamicHDRLoss: allowDynamicHDRLoss)
     }
     var planDescription: String {
         guard let media else { return "" }
-        do { return try AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss).summary }
+        do { return try AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss, allowDynamicHDRLoss: allowDynamicHDRLoss).summary }
         catch { return error.localizedDescription }
     }
     func chooseSource() {
@@ -37,7 +38,7 @@ final class AppleTVPreparationModel: ObservableObject {
     }
     func analyze(_ url: URL) {
         guard !isBusy else { return }
-        source = url; media = nil; result = nil; acknowledged = false
+        source = url; media = nil; result = nil; acknowledged = false; allowDynamicHDRLoss = false
         status = "Analyse ffprobe…"; fraction = 0; isBusy = true
         task = Task {
             defer { isBusy = false; task = nil }
@@ -60,14 +61,14 @@ final class AppleTVPreparationModel: ObservableObject {
     }
     func start(destination: URL) {
         guard !isBusy, plan != nil, acknowledged, let source else { return }
-        let selectedMode = mode, trackLoss = allowTrackLoss
+        let selectedMode = mode, trackLoss = allowTrackLoss, dynamicLoss = allowDynamicHDRLoss
         isBusy = true; fraction = 0; result = nil
-        status = selectedMode == .convert ? "Encodage vidéo VideoToolbox…" : "Remux sans réencodage vidéo…"
+        status = selectedMode == .preserve ? "Remux sans réencodage vidéo…" : "Encodage vidéo VideoToolbox…"
         task = Task {
             defer { isBusy = false; task = nil }
             do {
                 result = try await AppleTVPreparationService.prepare(source: source, destination: destination,
-                    mode: selectedMode, allowTrackLoss: trackLoss) { [weak self = self] value in
+                    mode: selectedMode, allowTrackLoss: trackLoss, allowDynamicHDRLoss: dynamicLoss) { [weak self = self] value in
                         Task { @MainActor [weak self] in
                             guard let self, self.isBusy, Int(value * 100) != Int(self.fraction * 100) else { return }
                             self.fraction = value
@@ -106,7 +107,7 @@ struct AppleTVPreparationView: View {
                 Picker("Vidéo", selection: $model.mode) {
                     ForEach(AppleTVMode.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                 }.disabled(model.isBusy)
-                Text("Copie sans perte si compatible. Conversion : véritable encodage H.264 SDR ≤1080p30 avec perte. HEVC copié : Apple TV 4K. HDR/HLG/Dolby Vision ne sont jamais réencodés ici.")
+                Text("Copie sans perte par défaut si compatible. H.264 SDR ≤1080p30 ou HEVC Main 10 HDR10 matériel avec perte pour Apple TV 4K. HDR10 : BT.2020/PQ limité et mastering/CLL requis, résolution/cadence inchangées ; aucun tone mapping. HLG et Dolby Vision sans base HDR10 8.1 validée sont refusés.")
                     .font(.caption).foregroundStyle(.secondary)
                 if let media = model.media {
                     DisclosureGroup("Diagnostic des pistes") {
@@ -115,6 +116,10 @@ struct AppleTVPreparationView: View {
                     }
                     Toggle("Autoriser l’exclusion des sous-titres et pièces jointes", isOn: $model.allowTrackLoss)
                         .disabled(model.isBusy)
+                    if model.mode == .hdr10 {
+                        Toggle("J’accepte le réencodage avec perte et la suppression de Dolby Vision / HDR10+ dynamiques si présents (HDR10 statique uniquement)", isOn: $model.allowDynamicHDRLoss)
+                            .disabled(model.isBusy)
+                    }
                     Text(model.planDescription).font(.caption).fixedSize(horizontal: false, vertical: true)
                     Toggle("J’accepte le compromis décrit (audio AAC stéréo si nécessaire)", isOn: $model.acknowledged)
                         .disabled(model.isBusy || model.plan == nil)

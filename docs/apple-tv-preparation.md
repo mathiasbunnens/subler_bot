@@ -12,7 +12,7 @@ Réglages → Apple TV → Choisir un fichier → consulter le diagnostic → ch
 
 La documentation officielle de Subler décrit du muxage et de l’édition de tags, pas une API d’encodeur vidéo extensible : https://subler.org/ . Le dictionnaire installé Subler 1.9.5 expose import/save/queue/métadonnées, sans commande d’installation de codec ou de sélection d’encodeur vidéo. Nous orchestrons FFmpeg dans notre application, sans modifier Subler tiers ; cela ne prétend pas prouver qu’aucune future modification du code amont serait possible.
 
-Sans le fichier ayant présenté « audio seulement » dans QuickTime, sa cause reste inconnue : codec/profil vidéo, format des pixels, configuration Dolby Vision, marquage MP4 ou flux endommagé sont des pistes, pas un diagnostic établi. Le marquage `hvc1` ne transforme pas une vidéo incompatible en vidéo compatible. Le nouveau diagnostic donne codec/profil/pixels/dimensions/transfert/Dolby Vision par piste, puis une raison précise de refus ; une erreur d’exécution est volontairement expurgée des chemins et tags personnels.
+QuickTime lit désormais le MP4 de référence fourni par l’utilisateur ; l’échec concernait une sortie de notre automatisation dont le chemin reste à confirmer. Il faut comparer les sorties manuelle et automatisée (mapping, options, flags et métadonnées), sans conclure à une incompatibilité HEVC générale. L’encodage HDR10 ci-dessous est une option demandée, pas la correction par défaut de cet incident. Le marquage `hvc1` ne transforme pas une vidéo incompatible en vidéo compatible. Les erreurs d’exécution sont volontairement expurgées des chemins et tags personnels.
 
 ## Profils conservateurs
 
@@ -28,6 +28,7 @@ Notre sous-ensemble volontairement plus étroit :
 | Préserver | H.264 8 bits 4:2:0 ; Main/High ≤4.2, Baseline ≤3.0 ; ≤1920×1080, ≤60 i/s | Copie sans réencodage, `avc1`, Apple TV HD/4K |
 | Préserver | HEVC Main/Main 10, 4:2:0 8/10 bits, niveau ≤5.1 ; ≤3840×2160, ≤60 i/s | Copie sans réencodage, `hvc1`, cible annoncée Apple TV 4K |
 | Convertir | Source SDR connue, ou source 8 bits non étiquetée interprétée SDR ; une seule vidéo | H.264 High 4.1 matériel, maximum 1080p30, débit cible 8 Mbit/s, AAC si nécessaire ; Apple TV HD/4K |
+| HEVC 10 bits HDR10 | HEVC Main 10 4:2:0, PQ/BT.2020 non constant, plage limitée explicitement indiquée, mastering et CLL complets ; ≤4K60/niveau 5.1, pixels carrés | VideoToolbox matériel uniquement, Main 10 `p010le` → `hvc1`, 25 Mbit/s avec perte, résolution/cadence inchangées ; Apple TV 4K |
 
 La conversion réduit résolution/cadence/profondeur si nécessaire, avec perte ; aucune garantie d’identité visuelle. Les sources anamorphiques ne sont pas converties afin de ne pas modifier silencieusement leurs proportions. Les sources 10 bits au transfert inconnu sont refusées en conversion.
 
@@ -35,9 +36,13 @@ Toutes les pistes audio sélectionnées sont copiées si elles sont AAC-LC stér
 
 ## HDR / Dolby Vision
 
-Aucun tone mapping ni réencodage HDR/HLG/Dolby Vision : la préparation est bloquée plutôt que de fabriquer un SDR simplement réétiqueté. Dolby Vision est refusé, y compris le profil 5 pourtant documenté par Apple : préservation RPU/profil non validée ici. Pas de conversion avec perte HDR/DV proposée dans cette version.
+Le profil explicite « HEVC 10 bits HDR10 » réalise un vrai réencodage. Le passage planar 10 bits vers semiplanar 10 bits ne modifie ni matrice, ni transfert, ni plage ; aucun tone mapping, filtre d’échelle ou conversion SDR. Les sources HLG, SDR, plage complète/inconnue, 8 bits ou métadonnées statiques manquantes/invalides sont refusées, jamais simplement réétiquetées HDR. Ce profil n’est pas une promesse de conservation bit à bit après encodage avec perte.
 
-Le planner accepte la copie HDR10 uniquement si HEVC Main 10/10 bits/PQ/BT.2020/BT.2020 non constant et présence de mastering metadata sont exposés par ffprobe au niveau du flux, puis revérifiés en sortie. Certains fichiers ne portent ces informations qu’au niveau des images : ils sont refusés. Ce contrôle vérifie la présence des caractéristiques, pas l’étalonnage ni toutes les valeurs de métadonnées dynamiques. HLG non validé est refusé. La préservation HDR10 sur une chaîne TV réelle n’a pas été certifiée ; ne pas confondre décodage d’images macOS et restitution HDR sur le téléviseur.
+Un consentement séparé est obligatoire pour le réencodage avec perte et la suppression des données dynamiques Dolby Vision/RPU et HDR10+ si présentes, même si l’analyse bornée n’en détecte pas. Dolby Vision n’est accepté qu’avec configuration explicite profil 8, compatibilité base 1 (HDR10), BL présente, EL absente, RPU présente. Profil 5/7, compatibilité HLG ou configuration incomplète : refus. Les filtres suppriment les side-data RPU, DOVI et HDR10+ avant encodage ; elles ne sont jamais transférées aveuglément aux nouveaux pixels. La sortie n’est pas annoncée Dolby Vision.
+
+VideoToolbox reçoit le mastering display et les niveaux CLL/FALL depuis les images décodées. Avant publication, les primaires/point blanc/luminances/CLL/FALL doivent être identiques aux valeurs de la source, avec sortie Main 10/PQ/BT.2020 limité et sans signal dynamique résiduel détecté. La source et le résultat sont sondés au niveau du flux et du premier paquet vidéo décodé (60 s/1 Mio par probe). Cela récupère notamment le mastering Matroska absent du diagnostic de flux ; ce n’est pas une certification des changements de métadonnées sur l’intégralité d’un film. La copie HDR10 garde ses critères conservateurs précédents, avec ce complément d’analyse.
+
+Sur le Mac de développement, un vrai encodage VideoToolbox conserve le mastering (4000/0,005 cd/m²) et CLL/FALL (1100/668) de la fixture. Si une autre version FFmpeg/macOS ou un autre matériel perd ces informations ou ne propose pas l’encodeur, aucun résultat n’est publié. Aucun fallback libx265 n’est proposé : pas d’installation, licence ou lenteur acceptée implicitement. La restitution HDR sur une chaîne TV réelle reste à vérifier par l’utilisateur ; décoder des images AVFoundation ne la certifie pas.
 
 ## Sûreté et limites opérationnelles
 
@@ -53,13 +58,14 @@ Le planner accepte la copie HDR10 uniquement si HEVC Main 10/10 bits/PQ/BT.2020/
 
 ## Dépendances et distribution
 
-Installer séparément `brew install ffmpeg`. La découverte GUI cherche la paire exécutable `ffmpeg`/`ffprobe` dans `/opt/homebrew/bin`, puis `/usr/local/bin`, sans supposer le PATH du terminal. Un FFmpeg sans `h264_videotoolbox` ou un Mac sans encodeur matériel exploitable échoue sans publier ; aucun fallback logiciel silencieux. Les tests utilisent également libx264/libx265 pour créer leurs seules sources synthétiques.
+Installer séparément `brew install ffmpeg`. La découverte GUI cherche la paire exécutable `ffmpeg`/`ffprobe` dans `/opt/homebrew/bin`, puis `/usr/local/bin`, sans supposer le PATH du terminal. Un FFmpeg sans l’encodeur `h264_videotoolbox`/`hevc_videotoolbox` choisi ou un Mac sans encodeur matériel exploitable échoue sans publier ; aucun fallback logiciel silencieux. Les tests utilisent également libx264/libx265 pour créer leurs seules sources synthétiques.
 
 FFmpeg n’est ni téléchargé automatiquement ni inclus dans le bundle. Sa licence dépend de sa compilation (Homebrew local testé : options GPL et version3) ; informations officielles : https://ffmpeg.org/legal.html . Toute future redistribution de binaires impose une revue de la configuration/licence et des obligations de distribution ; cette livraison ne les redistribue pas.
 
 ## Vérification reproductible, sans films personnels
 
 - `swift test` : planner, profils HDR/DV refusés, non-écrasement, remux H.264/HEVC Main 10 avec SHA-256 des images décodées identiques, vrai MPEG-4/PCM → H.264 VideoToolbox/AAC, décodage AVFoundation et FFmpeg, annulation, budget/cleanup et redémarrage après échec.
+- `swift test --filter 'HDR10PreparationTests|AppleTVPreparationTests'` : encodage HDR10 réel puis ffprobe/mastering/CLL, images AVFoundation, 24 images comparées en PSNR 10 bits >35 dB (timestamps alignés par numéro d’image), original inchangé ; refus SDR/HLG/8 bits et DV incompatible, consentement dynamique, métadonnées altérées, annulation et budget HDR. Ce contrôle PSNR borné n’est pas une mesure de restitution du téléviseur ni une preuve d’identité bit à bit.
 - `python3 scripts/appletv-ui-contract.py` : câblage Réglages et arrêt propre ; contrat source, pas test d’interactions natives.
 - `python3 scripts/appletv-smoke.py` : vraie vue SwiftUI hébergée en apparences claire/sombre et modèle réel ; analyse, blocage sans accord, conversion asynchrone, décodage et original inchangé. N’initialise pas la file automatique et n’envoie aucun Apple Event. Ce fixture n’automatise pas les panneaux natifs de choix de fichier et ne certifie pas visuellement tous les états.
 - `./build.sh` puis `SUBLER_BUILD_APP="$PWD/dist/Subler Automation.app" python3 scripts/version-contract.py` : bundle release, version 1.1.0/build 4 et signature ad hoc. Pas de notarisation.

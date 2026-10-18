@@ -32,7 +32,7 @@ Dans **Réglages → Apple TV**, choisissez un fichier puis consultez le diagnos
 
 - **Préserver la vidéo** (défaut) : remux H.264 compatible ou HEVC Main/Main 10 avec marquage `avc1`/`hvc1`. HEVC cible ici Apple TV 4K.
 - **Convertir pour Apple TV** : encodage matériel H.264 SDR avec perte, au maximum 1080p30, 8 Mbit/s ; audio non compatible converti en AAC stéréo. Accord explicite requis avant de démarrer.
-- HDR/HLG et Dolby Vision ne sont jamais réencodés. Dolby Vision est refusé ; HDR10 n’est admissible en copie que si les métadonnées requises sont exposées et retrouvées en sortie. Ce contrôle conservateur peut refuser un film pourtant lisible ailleurs.
+- **HEVC 10 bits HDR10** : véritable encodage matériel avec perte, BT.2020/PQ limité, mastering/CLL vérifiés, sans tone mapping. Accord séparé obligatoire pour supprimer Dolby Vision/HDR10+ dynamiques si présents ; seule la base HDR10 de Dolby Vision 8.1 est acceptée. HLG et conversions couleur non implémentées sont refusés. Aucun repli logiciel implicite. Le profil de copie reste le défaut.
 
 Choisissez une nouvelle destination MP4 locale. L’original et les fichiers existants ne sont jamais remplacés. Le résultat n’est pas envoyé automatiquement au serveur. La validation de décodage macOS n’est pas une certification sur votre Apple TV physique.
 

@@ -120,15 +120,36 @@ public enum AppleTVPreparationService {
     public static func inspect(source: URL, tools: AppleTVTools? = nil) async throws -> AppleTVMedia {
         _ = try PreparationIdentity.read(source)
         let tools = try tools ?? .discover()
-        let entries = "stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,level,width,height,avg_frame_rate,sample_aspect_ratio,color_transfer,color_primaries,color_space,channels,sample_rate:stream_disposition=attached_pic:stream_side_data:format=duration"
+        let entries = "stream=index,codec_type,codec_name,codec_tag_string,profile,pix_fmt,level,width,height,avg_frame_rate,sample_aspect_ratio,color_transfer,color_primaries,color_space,color_range,channels,sample_rate:stream_disposition=attached_pic:stream_side_data:format=duration"
         let data = try await PreparationProcess.run(tools.ffprobe, ["-v", "error", "-show_entries", entries, "-of", "json", source.path], timeout: 60, capture: true)
-        do { return try AppleTVMedia.decode(data) }
+        do {
+            let media = try AppleTVMedia.decode(data)
+            guard let video = media.videos.first, video.hdr || video.dolbyVision else { return media }
+            // Matroska often exposes mastering/CLL only on decoded frames, not streams.
+            // Bound decoding to the first packet; never scan an entire user's movie.
+            let frameData = try await PreparationProcess.run(tools.ffprobe,
+                ["-v", "error", "-select_streams", String(video.index), "-read_intervals", "%+#1",
+                 "-show_frames", "-show_entries", "frame=stream_index:frame_side_data", "-of", "json", source.path], timeout: 60, capture: true)
+            let frames = (try JSONSerialization.jsonObject(with: frameData) as? [String: Any])?["frames"] as? [[String: Any]] ?? []
+            var json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
+            var streams = json["streams"] as? [[String: Any]] ?? []
+            if let index = streams.firstIndex(where: { $0["index"] as? Int == video.index }) {
+                var side = streams[index]["side_data_list"] as? [[String: Any]] ?? []
+                for entry in frames.first?["side_data_list"] as? [[String: Any]] ?? [] {
+                    if !side.contains(where: { $0["side_data_type"] as? String == entry["side_data_type"] as? String }) { side.append(entry) }
+                }
+                streams[index]["side_data_list"] = side
+            }
+            json["streams"] = streams
+            return try AppleTVMedia.decode(JSONSerialization.data(withJSONObject: json))
+        }
+        catch is CancellationError { throw CancellationError() }
         catch { throw AutomationServiceError.message("Diagnostic ffprobe illisible ; préparation refusée.") }
     }
 
     /// Restart always reprobes/restarts; no incomplete cache is ever accepted as a finished movie.
     public static func prepare(source: URL, destination: URL, mode: AppleTVMode,
-                               allowTrackLoss: Bool = false, tools: AppleTVTools? = nil,
+                               allowTrackLoss: Bool = false, allowDynamicHDRLoss: Bool = false, tools: AppleTVTools? = nil,
                                maximumBytes: Int64 = maximumTemporaryBytes,
                                progress: @escaping @Sendable (Double) -> Void = { _ in }) async throws -> URL {
         try Task.checkCancellation()
@@ -149,7 +170,7 @@ public enum AppleTVPreparationService {
         }
         let tools = try tools ?? .discover()
         let media = try await inspect(source: source, tools: tools)
-        let plan = try AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss)
+        let plan = try AppleTVPlan.make(media: media, mode: mode, allowTrackLoss: allowTrackLoss, allowDynamicHDRLoss: allowDynamicHDRLoss)
         guard try PreparationIdentity.read(source) == original else { throw AutomationServiceError.message("La source a changé depuis l’analyse.") }
         let scratch = parent.appendingPathComponent(".appletv-" + UUID().uuidString, isDirectory: true)
         guard mkdir(scratch.path, 0o700) == 0 else { throw AutomationServiceError.message("Impossible de créer le cache exclusif.") }
@@ -188,6 +209,7 @@ public enum AppleTVPreparationService {
         }
         // Reject outputs that drifted outside the selected conservative Apple TV profile.
         _ = try AppleTVPlan.make(media: finished, mode: .preserve, allowTrackLoss: true)
+        if mode == .hdr10 { try AppleTVPlan.validateHDR10Output(source: media, output: finished) }
         if media.videos[0].hdr {
             guard finished.videos[0].hdr else { throw AutomationServiceError.message("Signal HDR perdu : publication bloquée.") }
         }
