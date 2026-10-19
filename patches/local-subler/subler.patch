@@ -100,10 +100,10 @@ index 00f3060..6a23d9e 100644
      }
  
 diff --git a/Classes/Document.swift b/Classes/Document.swift
-index a8dc15b..a9310d1 100644
+index a8dc15b..bee91a4 100644
 --- a/Classes/Document.swift
 +++ b/Classes/Document.swift
-@@ -12,6 +12,17 @@ import MP42Foundation
+@@ -12,6 +12,20 @@ import MP42Foundation
  @objc(SBDocument)
  final class Document: NSDocument {
  
@@ -117,11 +117,14 @@ index a8dc15b..a9310d1 100644
 +        return nextUniqueID
 +    }
 +    @objc dynamic let uniqueID = Document.allocateToken()
++    // Independent of the per-process AppleScript document counter: stale handles
++    // can never address a replacement document after this application restarts.
++    let backgroundToken = UUID().uuidString
 +
      private(set) var mp4: MP42File
      private var unsupportedMp4Brand: Bool
  
-@@ -42,15 +53,7 @@ final class Document: NSDocument {
+@@ -42,15 +56,7 @@ final class Document: NSDocument {
      }
  
      override func makeWindowControllers() {
@@ -287,21 +290,33 @@ index 544e48c..e24f5ea 100644
      }
  }
 diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
-index 879eaf2..6c3aaf9 100644
+index 879eaf2..de025dd 100644
 --- a/Classes/ScriptCommand.swift
 +++ b/Classes/ScriptCommand.swift
-@@ -13,6 +13,10 @@ import MP42Foundation
+@@ -13,6 +13,22 @@ import MP42Foundation
  protocol ScriptCommandDocumentTargeting {}
  extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
      func targetedDocument() -> Document? {
-+        if let token = self.evaluatedArguments?["ownedToken"] as? Int {
-+            return NSDocumentController.shared.documents.compactMap { $0 as? Document }
-+                .first { $0.uniqueID == token }
++        if let arguments = self.evaluatedArguments, arguments.keys.contains("ownedToken") {
++            // An explicit but stale/malformed token must never fall through to
++            // another document, receiver, or the frontmost document.
++            guard let token = arguments["ownedToken"] as? String else {
++                scriptErrorNumber = -1700
++                scriptErrorString = "Expected an owned UUID token."
++                return nil
++            }
++            let document = NSDocumentController.shared.documents.compactMap { $0 as? Document }
++                .first { $0.backgroundToken == token }
++            if document == nil {
++                scriptErrorNumber = -1728
++                scriptErrorString = "Owned background document no longer exists."
++            }
++            return document
 +        }
          // First, check for explicit document parameters ('into' or 'doc')
          if let evaluatedArgs = self.evaluatedArguments {
              if let doc = evaluatedArgs["into"] as? Document {
-@@ -60,6 +64,55 @@ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
+@@ -60,6 +76,55 @@ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
      }
  }
  
@@ -330,7 +345,7 @@ index 879eaf2..6c3aaf9 100644
 +            doc.mp4.metadata.merge(importer.metadata, overwrite: true)
 +            doc.fileURL = url // Search fallback; the queue writes a distinct destination.
 +            NSDocumentController.shared.addDocument(doc)
-+            return String(doc.uniqueID)
++            return doc.backgroundToken
 +        } catch {
 +            scriptErrorNumber = -10000
 +            scriptErrorString = "Background import failed."
@@ -342,8 +357,8 @@ index 879eaf2..6c3aaf9 100644
 +@objc(SBHasBackgroundDocumentScriptCommand)
 +class SBHasBackgroundDocumentScriptCommand: NSScriptCommand {
 +    override func performDefaultImplementation() -> Any? {
-+        guard let token = directParameter as? Int else { return false }
-+        return NSDocumentController.shared.documents.compactMap { $0 as? Document }.contains { $0.uniqueID == token }
++        guard let token = directParameter as? String else { return false }
++        return NSDocumentController.shared.documents.compactMap { $0 as? Document }.contains { $0.backgroundToken == token }
 +    }
 +}
 +
@@ -357,7 +372,7 @@ index 879eaf2..6c3aaf9 100644
  @objc(SBImportFileScriptCommand)
  class SBImportFileScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
      
-@@ -440,6 +493,8 @@ class SBSendToQueueScriptCommand: NSScriptCommand, ScriptCommandDocumentTargetin
+@@ -440,6 +505,8 @@ class SBSendToQueueScriptCommand: NSScriptCommand, ScriptCommandDocumentTargetin
          options[MP4264BitTime] = Prefs.mp464bitTimes
          
          // Create queue item and add to queue
@@ -367,7 +382,7 @@ index 879eaf2..6c3aaf9 100644
          
          // Add the queue item
 diff --git a/Subler.sdef b/Subler.sdef
-index 10e6f09..3f4ea77 100644
+index 10e6f09..2f606db 100644
 --- a/Subler.sdef
 +++ b/Subler.sdef
 @@ -10,6 +10,20 @@
@@ -376,7 +391,7 @@ index 10e6f09..3f4ea77 100644
          <!-- File Commands -->
 +        <command name="has background document" code="SublBgEx" description="Whether this exact owned token still refers to a document.">
 +            <cocoa class="SBHasBackgroundDocumentScriptCommand" />
-+            <direct-parameter type="integer" />
++            <direct-parameter type="text" />
 +            <result type="boolean" />
 +        </command>
 +        <command name="background state" code="SublBgSt" description="Report window count, active state, activation policy and document count for the local test harness.">
@@ -386,7 +401,7 @@ index 10e6f09..3f4ea77 100644
 +        <command name="import background file" code="SublBgIm" description="Import losslessly without constructing a window; return the owned document ID.">
 +            <cocoa class="SBImportBackgroundFileScriptCommand" />
 +            <direct-parameter type="file" description="The source file." />
-+            <result type="text" description="The opaque owned document token (decimal text, never localized)." />
++            <result type="text" description="The opaque owned UUID token, never reused across process restarts." />
 +        </command>
          <command name="import file" code="SublFilI" description="Import a file into the active document.">
              <cocoa class="SBImportFileScriptCommand" />
@@ -395,13 +410,13 @@ index 10e6f09..3f4ea77 100644
                  <type type="file" />
              </direct-parameter>
              <parameter name="doc" code="docu" type="document" optional="yes" description="The target document to send to queue." />
-+            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
++            <parameter name="owned token" code="bgtk" type="text" optional="yes"><cocoa key="ownedToken" /></parameter>
          </command>
  
          <command name="close document" code="SublClos" description="Close the active document window without prompting for unsaved changes.">
              <cocoa class="SBCloseFileScriptCommand" />
              <parameter name="doc" code="docu" type="document" optional="yes" description="The target document to close." />
-+            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
++            <parameter name="owned token" code="bgtk" type="text" optional="yes"><cocoa key="ownedToken" /></parameter>
          </command>
  
          <!-- Metadata Commands -->
@@ -409,7 +424,7 @@ index 10e6f09..3f4ea77 100644
          <command name="fetch metadata candidates" code="SublFRes" description="Fetch metadata results without applying them.">
              <cocoa class="SBFetchMetadataResultsScriptCommand" />
              <parameter name="into" code="into" type="document" optional="yes" description="The target document to fetch metadata candidates for." />
-+            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
++            <parameter name="owned token" code="bgtk" type="text" optional="yes"><cocoa key="ownedToken" /></parameter>
              <parameter name="limit" code="limt" type="integer" optional="yes" description="Maximum number of results to return." />
              <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
              <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
@@ -417,7 +432,7 @@ index 10e6f09..3f4ea77 100644
                  <type type="integer" />
              </direct-parameter>
              <parameter name="into" code="into" type="document" optional="yes" description="The target document to set metadata for." />
-+            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
++            <parameter name="owned token" code="bgtk" type="text" optional="yes"><cocoa key="ownedToken" /></parameter>
              <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
              <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
          </command>

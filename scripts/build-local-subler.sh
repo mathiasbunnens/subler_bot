@@ -16,8 +16,8 @@ xcodebuild -project "$source_root/Subler.xcodeproj" -scheme Subler -configuratio
     PRODUCT_BUNDLE_IDENTIFIER=local.sublerautomation.Subler build > "$LOCAL_SUBLER_BUILD_ROOT/build.log" 2>&1
 app="$LOCAL_SUBLER_BUILD_ROOT/Build/Products/Release/Subler.app"
 /usr/libexec/PlistBuddy -c 'Set :CFBundleName Subler Automation Local' "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :SublerAutomationBackgroundProtocol string 1' "$app/Contents/Info.plist" 2>/dev/null || \
-    /usr/libexec/PlistBuddy -c 'Set :SublerAutomationBackgroundProtocol 1' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :SublerAutomationBackgroundProtocol string 2' "$app/Contents/Info.plist" 2>/dev/null || \
+    /usr/libexec/PlistBuddy -c 'Set :SublerAutomationBackgroundProtocol 2' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Delete :LSUIElement' "$app/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c 'Add :LSBackgroundOnly bool true' "$app/Contents/Info.plist" 2>/dev/null || \
     /usr/libexec/PlistBuddy -c 'Set :LSBackgroundOnly true' "$app/Contents/Info.plist"

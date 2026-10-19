@@ -19,7 +19,7 @@ class LocalSublerContract(unittest.TestCase):
         source = self.text('Classes/ScriptCommand.swift')
         self.assertIn('class SBImportBackgroundFileScriptCommand', source)
         self.assertIn('isTrackMuxable', source)
-        self.assertIn('return String(doc.uniqueID)', source)
+        self.assertIn('return doc.backgroundToken', source)
 
     def test_local_storage_is_separate(self):
         for name in ['Logger', 'QueuePreferences', 'PresetManager', 'Preset', 'OCRManager']:

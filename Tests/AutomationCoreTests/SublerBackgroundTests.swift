@@ -7,7 +7,7 @@ final class SublerBackgroundTests: XCTestCase {
         XCTAssertFalse(target.isBackground)
         XCTAssertEqual(target.bundleIdentifier, "org.galad.Subler")
         XCTAssertNil(try target.validatedApplicationURL())
-        XCTAssertEqual(target.documentArgument(42, role: "into"), "into (document of window id 42)")
+        XCTAssertEqual(try target.documentArgument(SublerDocument(id: 42), role: "into"), "into (document of window id 42)")
     }
     func testInvalidLocalOptInNeverFallsBack() async {
         for path in ["", "relative.app", "/Applications/Subler.app", "/nonexistent/background.app"] {
@@ -19,10 +19,16 @@ final class SublerBackgroundTests: XCTestCase {
             catch { XCTAssertFalse(error.localizedDescription.contains("osascript")) }
         }
     }
-    func testBackgroundTargetsTokenNotWindow() {
+    func testBackgroundTargetsTokenNotWindow() throws {
         let target = SublerTarget(backgroundApplication: "/nonexistent/background.app")
-        XCTAssertEqual(target.documentArgument(42, role: "doc"), "owned token 42")
-        XCTAssertEqual(target.documentArgument(42, role: "into"), "owned token 42")
+        let token = "11111111-1111-4111-8111-111111111111"
+        let document = SublerDocument(id: 42, backgroundToken: token)
+        XCTAssertEqual(try target.documentArgument(document, role: "doc"), "owned token \"\(token)\"")
+        XCTAssertEqual(try target.documentArgument(document, role: "into"), "owned token \"\(token)\"")
+        XCTAssertThrowsError(try target.documentArgument(SublerDocument(id: 42), role: "doc"))
+        XCTAssertThrowsError(try target.documentArgument(SublerDocument(id: 42, backgroundToken: "42"), role: "doc"))
+        let replacement = SublerDocument(id: 42, backgroundToken: "22222222-2222-4222-8222-222222222222")
+        XCTAssertEqual(Set([document, replacement]).count, 2)
     }
     func testDifferentRunningLocalBuildIsRejected() throws {
         let target = SublerTarget(backgroundApplication: "/reviewed/Subler.app")
@@ -59,12 +65,55 @@ final class SublerBackgroundTests: XCTestCase {
         XCTAssertNotEqual(first.id, second.id)
         await service.close(document: first)
         do {
-            let state = try await AppleScriptService.run("tell \(try target.applicationClause()) to return {has background document \(first.id), has background document \(second.id)}")
+            let state = try await AppleScriptService.run("tell \(try target.applicationClause()) to return {has background document \(AppleScriptService.literal(first.backgroundToken!)), has background document \(AppleScriptService.literal(second.backgroundToken!))}")
             XCTAssertEqual(state, "false, true")
         } catch { await service.close(document: second); throw error }
         await service.close(document: second)
         let state = try await AppleScriptService.run("tell \(try target.applicationClause()) to return background state")
         XCTAssertEqual(state, "0|false|2|0")
+    }
+
+    func testRealStaleBackgroundHandleCannotTouchReplacement() async throws {
+        guard let app = ProcessInfo.processInfo.environment["SUBLER_TEST_BACKGROUND_APP"],
+              let input = ProcessInfo.processInfo.environment["SUBLER_TEST_BACKGROUND_FIXTURE"] else { throw XCTSkip("Explicit local build + generated fixture required") }
+        let target = SublerTarget(backgroundApplication: app)
+        let service = SublerService(target: target)
+        let source = URL(fileURLWithPath: input)
+        let old = try await service.prepare(source: source)
+        // Keep the service's old ownership record, as after an external native close/crash.
+        _ = try await AppleScriptService.run("tell \(try target.applicationClause()) to close document \(try target.documentArgument(old, role: "doc"))")
+        let replacement = try await service.prepare(source: source)
+        let destination = source.deletingLastPathComponent().appendingPathComponent("stale-\(UUID().uuidString).mp4")
+        do {
+            XCTAssertNotEqual(old.backgroundToken, replacement.backgroundToken)
+            do { _ = try await service.candidates(document: old); XCTFail("Stale candidates must fail") } catch {}
+            do {
+                try await service.convert(document: old, manual: ManualMovieMetadata(title: "Generated stale handle", year: 2026), destination: destination)
+                XCTFail("Stale conversion must fail")
+            } catch {}
+            // Exercise native metadata mutation directly too, without a provider request.
+            do {
+                _ = try await AppleScriptService.run("tell \(try target.applicationClause()) to fetch and set metadata candidate 1 \(try target.documentArgument(old, role: "into"))")
+                XCTFail("Stale metadata mutation must fail")
+            } catch {}
+            // Native handlers must also reject stale tokens independently of Swift preflights.
+            for command in [
+                "send to queue (POSIX file \(AppleScriptService.literal(destination.path))) \(try target.documentArgument(old, role: "doc"))",
+                "close document \(try target.documentArgument(old, role: "doc"))"
+            ] {
+                do {
+                    _ = try await AppleScriptService.run("tell \(try target.applicationClause()) to \(command)")
+                    XCTFail("Native stale mutation must fail")
+                } catch {}
+            }
+            await service.close(document: old)
+            let state = try await AppleScriptService.run("tell \(try target.applicationClause()) to return {has background document \(AppleScriptService.literal(old.backgroundToken!)), has background document \(AppleScriptService.literal(replacement.backgroundToken!))}")
+            XCTAssertEqual(state, "false, true")
+            let queued = try await service.queueState(destination: destination)
+            XCTAssertNil(queued)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+        } catch { await service.close(document: replacement); throw error }
+        await service.close(document: replacement)
     }
 
     func testRealBackgroundMetadataSelectionAndConversion() async throws {

@@ -1,11 +1,11 @@
 {
   "native_commits": {
-    "Subler": "5442a166933cd3b20982465db121884253d5e714",
+    "Subler": "bf8dc30bb47d615ce6646e87f2dad3165731c141",
     "MP42Foundation": "9c89c9a0c9d9b07b801e72c7055212633d1ef569"
   },
   "generated_native_checks_count": 35,
   "generated_native": {
-    "evidence": "local-subler-bjg4xccy",
+    "evidence": "local-subler-upu8_yjr",
     "checks": {
       "mp4_source_unchanged": true,
       "mp4_all_images": true,
@@ -92,24 +92,24 @@
     ]
   },
   "swift_suite": {
-    "total": 168,
-    "skipped": 15,
+    "total": 169,
+    "skipped": 16,
     "failures": 0
   },
   "live_background_suite": {
-    "total": 7,
+    "total": 8,
     "skipped": 0,
     "failures": 0
   },
   "external_observations": [
     {
-      "samples": 191,
+      "samples": 239,
       "local_windows": 0,
       "local_frontmost": 0,
       "installed_queue_unchanged": true
     },
     {
-      "samples": 169,
+      "samples": 340,
       "local_windows": 0,
       "local_frontmost": 0,
       "installed_queue_unchanged": true
@@ -222,8 +222,18 @@
     }
   },
   "source_patch_sha256": {
-    "subler.patch": "77387520c2ba8581cab607fbbb05cf9d279e2aa88ea811e2837d15d84e74608d",
+    "subler.patch": "2d6d13e2527b4cd6d231bb986c2eeefd004984724166f8c750aa6d279a0d2501",
     "mp42foundation.patch": "3d97ebacccf0fbf5bf55512efacbcafc6b04fc21323e59bc82a6c9504a8faf24"
+  },
+  "ownership_v2": {
+    "protocol_marker": "2",
+    "native_token": "per-document UUID, independent of process-local uniqueID counter",
+    "baseline_regression": "old integer protocol fails deterministic replacement document ID=1 case",
+    "current_regression": "unchanged native resolver passes same-counter restart model, stale/malformed explicit token cannot use document/frontmost fallback",
+    "live_regression": "retained Swift ownership after owned document closes: stale candidates/metadata/convert rejected, stale close harmless, replacement document retained, no output/queue entry",
+    "actual_user_process_restart_for_regression": false,
+    "logs": ["t386-token-red.log", "t386-token-swift.log", "t386-token-live.log", "t386-token-native.log", "t386-token-native-build.log", "t386-token-app-build.log"],
+    "log_root": "/Users/mathiasbunnens/.hermes/profiles/codex-dev-2/cache/scratch"
   },
   "limits": [
     "Local opt-in only; no production rollout or publication",

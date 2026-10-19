@@ -5,7 +5,6 @@ The extracted fixture intentionally omits original chapter/subtitle/fallback ass
 those are tested by the separate generated rich-container harness.
 """
 import argparse
-from decimal import Decimal
 import json
 from pathlib import Path
 import runpy
@@ -56,9 +55,9 @@ def main():
         report['checks']['original_prefix_nals_timing'] = original_prefix['packets'] == baseline['packets'][:len(original_prefix['packets'])]
         report['before_apple'] = h['apple'](native, source)
         report['checks']['before_decoder_rejects'] = report['before_apple']['start_failed']
-        doc=int(Decimal(script(f'return (import background file (POSIX file {literal(source)})) as integer')))
+        doc=script(f'return import background file (POSIX file {literal(source)})')
         report['checks']['import_windowless'] = script('return background state') == '0|false|2|1'
-        script(f'send to queue (POSIX file {literal(target)}) owned token {doc}')
+        script(f'send to queue (POSIX file {literal(target)}) owned token {literal(doc)}')
         for _ in range(100):
             if script('return background state') == '0|false|2|0': doc=None; break
             time.sleep(.02)
@@ -91,7 +90,7 @@ def main():
         report['checks']['closed_windowless']=script('return background state')=='0|false|2|0'
         report['checks']['original_unchanged']=args.source.stat()==before
     finally:
-        if doc is not None: script(f'close document owned token {doc}')
+        if doc is not None: script(f'close document owned token {literal(doc)}')
         shutil.rmtree(root)
         report['private_media_deleted']=not root.exists()
         out=args.scratch/'local-subler-dv81-results.json'

@@ -19,7 +19,7 @@ public struct SublerTarget: Sendable {
         }
         let url = URL(fileURLWithPath: path)
         guard let bundle = Bundle(url: url), bundle.bundleIdentifier == bundleIdentifier,
-              bundle.object(forInfoDictionaryKey: "SublerAutomationBackgroundProtocol") as? String == "1",
+              bundle.object(forInfoDictionaryKey: "SublerAutomationBackgroundProtocol") as? String == "2",
               bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool == true else {
             throw AutomationServiceError.message("Local Subler is missing or is not the reviewed background build. No installed-app fallback was attempted.")
         }
@@ -37,7 +37,13 @@ public struct SublerTarget: Sendable {
         if let url = try validatedApplicationURL() { return "application \(AppleScriptService.literal(url.path))" }
         return "application id \(AppleScriptService.literal(bundleIdentifier))"
     }
-    internal func documentArgument(_ id: Int, role: String) -> String {
-        isBackground ? "owned token \(id)" : "\(role) (document of window id \(id))"
+    internal func documentArgument(_ document: SublerDocument, role: String) throws -> String {
+        if isBackground {
+            guard let token = document.backgroundToken, UUID(uuidString: token) != nil else {
+                throw AutomationServiceError.message("Background document requires an owned UUID token.")
+            }
+            return "owned token \(AppleScriptService.literal(token))"
+        }
+        return "\(role) (document of window id \(document.id))"
     }
 }

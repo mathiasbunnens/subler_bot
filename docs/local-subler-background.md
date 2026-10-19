@@ -8,13 +8,13 @@ Installed Subler 1.9.5's document-to-queue AppleScript handler omits `MP42ForceH
 
 The separate local build sends the native queue both force-hvc1 and strict-normalization options. MP42Foundation validates hvcC and each complete length-prefixed sample before editing; it removes only byte-identical copies of configured VPS/SPS/PPS, leaving VCL, SEI, RPU and other retained NAL bytes untouched. Native hvc1 writing supplies complete parameter arrays. Changing/ambiguous/malformed parameter sets, nonzero NAL layers, parameter-only samples, enhancement-layer configurations, and Dolby Vision configurations other than supported single-layer 8.1 are refused. There is no encode, SDR conversion, audio conversion or FFmpeg repackager fallback. Native write failures propagate as failed queue items; a failed partial scratch output is not a publishable conversion.
 
-Import uses MP42's importer directly, rejects conversion-requiring/nonmuxable tracks and multiple sample descriptions, imports all supported tracks/metadata, and returns a native owned token without constructing a document window. Metadata candidate lookup/application and the existing owned queue workflow use that token instead of a window ID. Enqueue closes only that document. Tokens are live-process identifiers, not durable handles across a native-app restart.
+Import uses MP42's importer directly, rejects conversion-requiring/nonmuxable tracks and multiple sample descriptions, imports all supported tracks/metadata, and returns a native owned UUID token without constructing a document window. Metadata candidate lookup/application and the existing owned queue workflow use that token instead of a window ID. Enqueue closes only that document. Protocol v2 tokens are generated independently of the native document counter and never intentionally reused after restart. Native targeting rejects stale/malformed explicit tokens without falling back to another document. Presence/close uses the same UUID; stale close is harmless. Swift ownership keys include the UUID and allocate separate service-local IDs, so preparing a replacement cannot overwrite an old ownership record. Conversion checks native presence before queue recovery and native enqueue rechecks the exact UUID.
 
 A second bug was reproduced deterministically: after the last item completed, a new append/start could fall between the empty scan and the transition to idle. The only start was dropped. The queue now commits its empty/idle transition under the same array lock; a barrier-based regression failed before the change and passes after it. No polling/repeated-start workaround was added to the Swift service.
 
 ## Isolation and opt-in
 
-- Bundle ID: `local.sublerautomation.Subler`; protocol marker: `SublerAutomationBackgroundProtocol = 1`.
+- Bundle ID: `local.sublerautomation.Subler`; protocol marker: `SublerAutomationBackgroundProtocol = 2`. The Swift target rejects the old integer-token v1 build.
 - `LSBackgroundOnly`, prohibited activation policy; no document, queue or activity-window construction during the tested route. Automatic updater controller/feed disabled.
 - Preferences use the distinct bundle ID; queue/logs/presets/OCR files use `~/Library/Application Support/SublerAutomationLocal`, never the installed app's `Subler` directory.
 - The default Automation route remains `org.galad.Subler`. Set `SUBLER_AUTOMATION_LOCAL_SUBLER_APP` explicitly to the absolute local bundle path to opt in. Invalid configuration fails closed, never falls back to the installed app. A running different local build is rejected rather than silently reused or terminated.
@@ -41,7 +41,7 @@ Native sources remain separate Git repositories, ignored by the main repo. The m
 - SublerApp/MP42Foundation: `bfa477b799ce55716f744638e6dfe3f23d39c5d7` (explicit override of Subler's older submodule pin).
 - SublerApp/contrib: `debd14253dba88addfd918d144fb7872a9e075f7`.
 - Upstream Xcode project pins Sparkle 2.9.6 exactly.
-- Local native commits: Subler `5442a16`, MP42Foundation `9c89c9a`; neither pushed.
+- Local native commits: Subler `bf8dc30`, MP42Foundation `9c89c9a`; neither pushed.
 
 On a fresh checkout with no `vendor-local/Subler` directory:
 
@@ -58,7 +58,8 @@ On a fresh checkout with no `vendor-local/Subler` directory:
 
 `docs/local-subler-evidence.json` records the measured results without private media names.
 
-- Full Swift suite: 168 tests, 15 opt-in/integration skips, 0 failures. Explicit live background suite: 7 tests, 0 skips/failures, including online metadata selection, persisted title/year validation, manual conversion and closing one of two owned documents without affecting the other.
+- Full Swift suite: 169 tests, 16 opt-in/integration skips, 0 failures. Explicit live background suite: 8 tests, 0 skips/failures, including online metadata selection, persisted title/year validation, manual conversion, closing one of two owned documents, and rejection of stale candidates/metadata/convert/close without affecting a replacement document or creating an output/queue entry.
+- Ownership regression executes the unchanged native resolver with AppKit stand-ins and deterministic process/counter reuse (old and replacement native ID both 1). `python3 scripts/test-local-subler-token.py --baseline` fails against the old integer-token handler; the current handler passes, including explicit stale/malformed tokens with valid document/frontmost fallbacks supplied. No user process is restarted for this regression. Live Apple Events separately exercise the actual rebuilt handlers and retained Swift ownership records after an owned document is externally closed.
 - Generated HDR10 MP4, MKV and rich MP4: each yields 48/48 AVAssetReader image buffers, successful reader completion, and three images after seek. All 35 native preservation/refusal checks pass, including rejection of a changed VPS rather than reporting completion.
 - MP4/rich: retained NAL hashes and rational PTS/DTS/durations unchanged; every audio packet and timing unchanged. Rich fixture has six audios, three `fall` references, chapters, subtitles, artwork, track flags, alternate groups, languages and edit lists; tested identities preserved.
 - MKV: retained payloads unchanged. Container time-base conversion is not rationally identical: timestamps remain within one source tick (1 ms), and agree with the unchanged native importer baseline. Do not claim bit-exact MKV timestamp identity.
@@ -72,6 +73,7 @@ Generated-only repeat commands (macOS/Xcode, FFmpeg/FFprobe at `/opt/homebrew/bi
     export TMPDIR="/absolute/owned/scratch"
     python3 scripts/test-local-subler-contract.py
     python3 scripts/test-local-subler-queue.py
+    python3 scripts/test-local-subler-token.py
     python3 scripts/test-local-subler-patches.py
     clang -fsanitize=address,undefined -I vendor-local/Subler/MP42Foundation/MP42 \
       scripts/test-strict-hevc.c -o "$TMPDIR/strict-hevc-test"

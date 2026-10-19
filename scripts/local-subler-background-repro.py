@@ -5,7 +5,6 @@ Uses its isolated queue. Refuses any pre-existing documents or active queue item
 Does not clear queue entries, terminate applications, or activate windows.
 """
 import argparse
-from decimal import Decimal
 from fractions import Fraction
 import hashlib
 import json
@@ -171,9 +170,9 @@ def main():
                  '-x265-params', 'log-level=error:repeat-headers=1:hdr10=1:master-display=G(13250,34500)B(7500,3000)R(34000,16000)WP(15635,16450)L(40000000,50):max-cll=1100,668',
                      '-c:a', 'aac', '-shortest', source])
             digest = hashlib.sha256(source.read_bytes()).hexdigest()
-            doc = int(Decimal(script(f'return (import background file (POSIX file {literal(source)})) as integer')))
+            doc = script(f'return import background file (POSIX file {literal(source)})')
             assert observe() == 1
-            script(f'send to queue (POSIX file {literal(target)}) owned token {doc}')
+            script(f'send to queue (POSIX file {literal(target)}) owned token {literal(doc)}')
             for _ in range(50):
                 if observe() == 0:
                     doc = None
@@ -249,7 +248,7 @@ def main():
         result['checks']['windowless_inactive'] = bool(observations)
     finally:
         if doc is not None:
-            script(f'close document owned token {doc}')
+            script(f'close document owned token {literal(doc)}')
         result['observations'] = observations
         (root / 'results.json').write_text(json.dumps(result, indent=2))
         print(json.dumps(result, indent=2))
