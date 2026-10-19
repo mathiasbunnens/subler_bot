@@ -101,3 +101,40 @@ An initial attempt to map every original stream was killed at the 120-second sub
 ### Existing server output procedure
 
 Keep the current server MP4 and known-good manual output unchanged. Do not run the diagnostic excerpt command over the entire movie or publish its deliberately incomplete stream mapping. Once the metadata-preserving repackager passes the generated native-container fixture, create a **new distinct local output** (never overwrite the server original), compare complete packet/atom/timing preservation and Apple decoding, then ask the user to verify QuickTime images/audio/seeking and HDR/DV indication. Server replacement/publication and a full personal-film conversion were not authorized here. Until those steps pass, using the existing manual Subler output is the known user-reported workaround, not an automated repair claim.
+
+## Installed scripting API follow-up (t_38603758)
+
+**Still not a production repair.** No production Swift code, installed app, Subler preferences, foreign queue item or personal media was changed in this follow-up. Only generated HDR10 fixtures and exclusively owned Subler documents were used. A new repeatable installed-API diagnostic is committed; the task remains blocked, not fixed.
+
+### The missing option and the native manual path
+
+Upstream Subler `main` was inspected at `9077b6d149be621ff7d7b0d8eb46839a56610844`:
+
+- `Document.saveOptions(for:)` includes `MP42ForceHvc1` when `Prefs.forceHvc1` is true. GUI Save/Save As and the GUI Send To Queue save panel use this function. `Document.writeSafely` additionally applies alternate-group/language/media-characteristic preferences; those are further differences, not proven causes of this decoder failure.
+- `Prefs.swift` declares `SBForceHvc1` with default **true**. Installed Subler is **1.9.5**; a read of that single stored preference found no explicit override. No preference was written.
+- `SBSaveAsScriptCommand` and `SBSendToQueueScriptCommand` instead create their own dictionary containing only `MP4264BitData` and `MP4264BitTime`. Neither the installed SDEF nor those handlers offer a caller-supplied options dictionary. Opening/importing a document differently cannot add a missing export attribute to these commands.
+- Standard Cocoa AppleScript `save ... in ...` was tried on an exclusively owned generated document: installed Subler returns **-1708** (does not understand `save`). It is not a hidden way to invoke the native GUI save options.
+- The installed custom AppleScript `save as ... doc ...` actually creates **hev1**, and Apple's image decoder rejects it with **-11833 / -12906**, just as the native empty-options experiment predicts. Thus replacing `send to queue` with this custom command is not a repair either.
+- Upstream PR **165** is still **open / not merged**. Latest official release queried is **1.9.5**. Do not silently build/install a patched third-party app to bypass this task's no-fork boundary. Subler's `LICENSE` identifies GPLv2 in combination; no upstream implementation was copied into product code.
+
+MP42Foundation `MP42Muxer.m`, HEVC and Dolby Vision HEVC setup branches, calls `force_HEVC_completeness` on the configuration cookie **before** `analyze_HEVC` and the native video-track creation. This identifies the step choosing hvc1 versus hev1. It does not remove parameter sets from the media samples. The existing direct installed-library experiment confirms identical packet payloads and in-band VPS/SPS/PPS with either option. Upstream source is explanatory evidence, not an asserted binary/source identity for the installed build.
+
+### Repeatable installed-API diagnostic and an additional red gate
+
+    python3 scripts/subler-scripted-save-repro.py \
+      --scratch /absolute/existing/scratch \
+      --authorize-owned-subler-documents
+
+This command accepts **no media input**, generates its own fixture through the existing six-check runner, uses opaque owned window IDs, never starts/enqueues/clears the queue, and verifies exact queue-record snapshots without printing their identifiers/paths. It verifies document closure by dereferencing the document, not `exists window`: installed Subler retains stale window wrappers after a document closes. A custom-save document changes its name, so retaining its initial name-based object reference is also unsafe.
+
+Final evidence: `/Users/mathiasbunnens/.hermes/profiles/codex-dev-2/cache/scratch/hevc-packaging-_5c1xmce/scripted-save-results.json`.
+
+Eight diagnostic checks succeeded: standard-save refusal, custom-save decoder refusal, positive native force-hvc1 image output with reader completion, equal custom/default-native video packets and timing, equal audio packets and timing, unchanged generated source, verified owned-document closure, and unchanged queue records. **The runner nevertheless exits 1**: the full-image gate remains red. The force-hvc1 synthetic output contains 24 compressed video packets but AVAssetReader emits only 13 images before completed status. Independent FFprobe decoding reports duplicate POC and only 5 decoded frames; packet timestamps also contain a discontinuity. This is additional evidence against treating the earlier three-image check as full-stream preservation. It does not establish the cause of the synthetic import/timing problem or contradict the earlier authorized DV8.1 excerpt's separate 50/50 result. Do not weaken this gate or infer that the option alone is a complete production solution. A proper generated rich-container fixture must also test presentation timing, not just equality between two native outputs.
+
+A bounded GUI Save experiment on owned generated documents produced no accepted output/evidence and was abandoned; its documents were closed. No GUI-parity, seek, rich-container or DV-preservation success is claimed for this follow-up. No GUI keystroke automation was added to the unattended service.
+
+### Decision required before changing the production route
+
+The precise public AppleScript limitation is now exercised rather than assumed. A pure caller-side `prepare`/custom `save as` substitution cannot set this option. The preferred native option route needs a Subler release exposing/fixing it, or explicit authorization to build/install a separately reviewed third-party correction. Alternatively, choose a background-safe native-helper architecture with preservation gates; the existing probe is not such a helper. Shipping Accessibility-driven global menu/keystroke automation as a silent replacement would add a permission/focus failure mode and is not an approved unattended design.
+
+Verification of the unchanged product: `./build.sh` succeeded, including strict ad-hoc signature verification; uninstalled bundle is at `/Users/mathiasbunnens/.hermes/profiles/codex-dev-2/cache/scratch/t38603758-build/Subler Automation.app`. `swift test --filter SublerServiceTests` executed 16 tests, 5 opt-in tests skipped, 0 failures. The installed-API diagnostic remains intentionally **red (exit 1)** at the full-image gate. No personal original was opened, extracted, overwritten or published in this follow-up, and no product-fix claim is justified.
