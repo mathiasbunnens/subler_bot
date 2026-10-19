@@ -1,4 +1,5 @@
-// Synthetic fixtures only; no application, queue, preferences, or user caches.
+// Offline fixtures only; personal excerpts require explicit authorization.
+// No application, queue, preferences, or user caches.
 #import <Foundation/Foundation.h>
 #import <AVFoundation/AVFoundation.h>
 #import <MP42Foundation/MP42Foundation.h>
@@ -27,6 +28,9 @@ int main(int argc, const char *argv[]) {
         for (AVAssetTrack *track in tracks) {
             NSLog(@"enabled=%d formats=%@", track.enabled, track.formatDescriptions);
             AVAssetReader *reader = [[AVAssetReader alloc] initWithAsset:asset error:&error];
+            BOOL all = argc == 4 && strcmp(argv[3], "all") == 0;
+            BOOL seek = argc == 4 && strcmp(argv[3], "seek") == 0;
+            if (seek) reader.timeRange = CMTimeRangeMake(CMTimeMake(1, 1), CMTimeMake(1, 1));
             BOOL compressed = argc == 4 && strcmp(argv[3], "compressed") == 0;
             AVAssetReaderTrackOutput *output = [[AVAssetReaderTrackOutput alloc] initWithTrack:track outputSettings:compressed ? nil : @{(NSString *)kCVPixelBufferPixelFormatTypeKey: @(kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange)}];
             [reader addOutput:output];
@@ -37,7 +41,7 @@ int main(int argc, const char *argv[]) {
                 if (compressed) NSLog(@"samples=%ld data=%p length=%zu", CMSampleBufferGetNumSamples(sample), CMSampleBufferGetDataBuffer(sample), CMSampleBufferGetDataBuffer(sample) ? CMBlockBufferGetDataLength(CMSampleBufferGetDataBuffer(sample)) : 0);
                 if (CMSampleBufferGetImageBuffer(sample)) ++count;
                 CFRelease(sample);
-                if (count >= 3) break;
+                if (!all && count >= 3) break;
             }
             NSLog(@"decodedImages=%d status=%ld error=%@", count, (long)reader.status, reader.error);
             [reader cancelReading];

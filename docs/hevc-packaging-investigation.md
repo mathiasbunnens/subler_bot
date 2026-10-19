@@ -1,6 +1,8 @@
 # QuickTime audio-only HEVC: investigation and remux decision
 
-Status: diagnostic reproduced; **no production correction installed**. A blanket `hev1` → `hvc1` rewrite was rejected. The existing film was neither remuxed, extracted, decoded nor modified during this run; only its MP4 metadata boxes were read. No Subler application/queue, watched folder, live cache, TV or LAN operation was performed.
+Status: **a lossless packaging repair now produces Apple images on the authorized DV8.1 excerpt; no production correction installed**. Full-file preservation is still blocked by native track associations, not by a demonstrated need to transcode. A blanket `hev1` → `hvc1` rewrite remains rejected. The original was never modified/replaced. No Subler application/queue, watched folder, live cache, TV or LAN operation was performed.
+
+The sections below through “Sources” record the earlier metadata-only/HDR10 investigation. The authorized DV8.1 follow-up at the end supersedes its pending-permission statements; do not read earlier scope limitations as the current test result.
 
 ## Proven versus suspected
 
@@ -62,3 +64,40 @@ Until that DV8.1 preservation/playback evidence is available, the real-film corr
 - https://raw.githubusercontent.com/SublerApp/Subler/main/Classes/QueueItem.swift (initializers and process)
 - Installed `/Applications/Subler.app/Contents/Resources/Subler.sdef`
 - Installed MP42Foundation used directly by the native synthetic harness, not a substituted muxer.
+
+## Authorized DV8.1 follow-up
+
+The user explicitly authorized a short private excerpt. `scripts/hevc-dv81-remux-repro.py` now performs a two-second video/all-audio experiment only when both an explicit `--source` and `--authorize-personal-excerpt` are supplied. It creates an exclusive 0700 scratch child, never prints/persists tool commands or raw native/FFmpeg errors, and removes its media/binaries even on failure. Only hashes, codec records, rational timestamps and sanitized diagnostics survive in `dv81-remux-results.json`. Do not run it on additional personal media without permission.
+
+### What is now proven
+
+- The actual original DV8.1/PQ HEVC track fails Apple decoder startup. Its first bounded video packets contain repeated VPS/SPS/PPS in-band, RPU NAL type 62 and SEI type 39. Thus the strict metadata-only normalizer really cannot repair this input.
+- A two-second stream-copy excerpt reproduces that Apple failure. Its bounded video prefix has identical NAL hashes and rational PTS/DTS/durations to the original. Every original audio track is included: six tracks (AAC, AC-3 and E-AC-3).
+- On this excerpt, a real remux using video stream copy, `filter_units=remove_types=32|33|34`, `-tag:v:0 hvc1` and `-strict unofficial` removes only repeated parameter sets. Every removed parameter set already exists byte-for-byte in hvcC. All retained VCL/SEI/RPU/AUD bytes, ordering and rational timestamps remain identical. Complete VPS/SPS/PPS arrays remain in hvcC.
+- dvvC, colr, clli and mdcv remain byte-identical between excerpt and repaired excerpt. Every audio packet hash and rational timestamp agrees across all six excerpt tracks; there is no audio encode, including for E-AC-3.
+- Apple AVAssetReader produces all **50/50 image buffers** and reaches completed status (2), with no reported error. A separate seek to one second produces three images. This is decoder evidence, not just isPlayable or a track count.
+- An actual negative-control remux removing RPU NALs is rejected by the retained-NAL comparison, even though a Dolby configuration record alone could look plausible.
+- The final asserting run passes **20 checks**. The earlier six-check synthetic MP42/HDR10 reproduction also passes with the extended native probe. Release build and strict ad-hoc signature verification pass; the app bundle was not launched or installed.
+- Original identity, size and nanosecond mtime match the initial snapshot across the experiments. All personal excerpt MP4s, native test binaries and initial private tool logs were removed after validation. Synthetic generated fixtures are separate and contain no user media.
+
+This establishes that packaging changes without a video/audio transcode suffice for the tested original prefix. It does **not** isolate one bit of the packaging as the sole cause, certify the rest of the movie, or prove a Dolby Vision display/AirPlay/TV result. No tone mapping or HDR10/SDR conversion was performed.
+
+### Concrete limit: why this command is not installed in the pipeline
+
+The original native container has three `tref/fall` audio fallback associations plus a `tref/chap` chapter association. Even the video/all-six-audio excerpt with `-map_metadata 0` loses all three audio fallback references. The chapter relationship is intentionally not mapped into this excerpt and is not counted as an accidental loss. The strict remux cannot restore associations already discarded by FFmpeg extraction.
+
+Thus packet-perfect audio and equal audio counts do **not** establish native multitrack equivalence. Installing that FFmpeg command after every queue item would knowingly omit required preservation checks. Subtitles, chapters, artwork, alternate groups, edit lists, native metadata and full-stream parameter-set stability remain outside the certified experiment. The result must not be labelled a fixed production pipeline.
+
+An initial attempt to map every original stream was killed at the 120-second subprocess limit and produced no accepted output. Sparse subtitle/chapter tracks can make an output `-t 2` insufficient to bound input demuxing. That attempt was removed from the replayable runner; do not repeat it against the personal original. Its scratch media/logs were deleted. Use generated rich-container fixtures to work on this instead.
+
+### Required production repair, in order
+
+1. Build a generated multitrack fixture containing native `fall`/alternate associations, a chapter reference, subtitles, artwork and identity metadata. Add failing preservation assertions before product code. Keep the real-film sample strictly bounded and delete it after each authorized run.
+2. Implement an owned-output MP4 repackager (or verify a native-library path) that removes only byte-equivalent in-band parameter sets, retains hvcC/DV/HDR metadata, and preserves native metadata and track relationships. Rebuild sample sizes/chunk offsets as necessary; merely switching to the UI's force-hvc1 option still leaves parameter sets in-band in the demonstrated library fixture. Do not substitute a whole-file FFmpeg command that drops `fall` references.
+3. Scan all applicable generated HEVC samples before repair. Reject changing/unmatched parameter sets, unsupported DV/EL/FEL, ambiguous sample descriptions or unsupported atoms without publishing. The DV8.1 result is not permission to normalize DV8.4/profile5/profile7 blindly.
+4. Stage exclusively in the owned job directory, validate all retained NALs/audio/subtitles/timings and native atom associations, then require Apple image/seek evidence. Recheck source fingerprint and original generated-output digest before atomic replacement. On any failure/cancellation, keep the old generated MP4 and source. Never mutate an already-validated transfer-only job without an explicit version/revalidation policy.
+5. Integrate after exact queue completion and before candidate validation, output digest and publication, including unvalidated recovery paths. Do not alter global Subler preferences, foreign queue entries, source cleanup or no-overwrite SMB behavior.
+
+### Existing server output procedure
+
+Keep the current server MP4 and known-good manual output unchanged. Do not run the diagnostic excerpt command over the entire movie or publish its deliberately incomplete stream mapping. Once the metadata-preserving repackager passes the generated native-container fixture, create a **new distinct local output** (never overwrite the server original), compare complete packet/atom/timing preservation and Apple decoding, then ask the user to verify QuickTime images/audio/seeking and HDR/DV indication. Server replacement/publication and a full personal-film conversion were not authorized here. Until those steps pass, using the existing manual Subler output is the known user-reported workaround, not an automated repair claim.
