@@ -91,8 +91,11 @@ import AutomationCore
 enum PermissionNativeAccess {
     @MainActor static func launchSublerIfNeeded() async -> Bool {
         guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil else { return true }
-        if !NSRunningApplication.runningApplications(withBundleIdentifier: "org.galad.Subler").isEmpty { return true }
-        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.galad.Subler") else { return false }
+        let target = SublerTarget()
+        let localURL: URL?
+        do { localURL = try target.validatedApplicationURL() } catch { return false }
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleIdentifier).isEmpty { return true }
+        guard let url = localURL ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier) else { return false }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = false
         do {
@@ -102,10 +105,12 @@ enum PermissionNativeAccess {
     }
     static func automation(request: Bool) async -> PermissionDecision {
         guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil else { return .granted }
+        let configuredTarget = SublerTarget()
+        do { _ = try configuredTarget.validatedApplicationURL() } catch { return .denied }
         if request, !(await launchSublerIfNeeded()) { return .undetermined }
         // Permission determination sends no conversion Apple Event and imports nothing.
         return await Task.detached(priority: .userInitiated) {
-            let target = NSAppleEventDescriptor(bundleIdentifier: "org.galad.Subler")
+            let target = NSAppleEventDescriptor(bundleIdentifier: configuredTarget.bundleIdentifier)
             let status = AEDeterminePermissionToAutomateTarget(target.aeDesc, AEEventClass(typeWildCard), AEEventID(typeWildCard), request)
             if status == noErr { return PermissionDecision.granted }
             if status == errAEEventWouldRequireUserConsent || status == procNotFound { return PermissionDecision.undetermined }

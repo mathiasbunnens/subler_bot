@@ -1,0 +1,235 @@
+{
+  "native_commits": {
+    "Subler": "5442a166933cd3b20982465db121884253d5e714",
+    "MP42Foundation": "9c89c9a0c9d9b07b801e72c7055212633d1ef569"
+  },
+  "generated_native_checks_count": 35,
+  "generated_native": {
+    "evidence": "local-subler-bjg4xccy",
+    "checks": {
+      "mp4_source_unchanged": true,
+      "mp4_all_images": true,
+      "mp4_seek": true,
+      "mp4_retained_nals_timing": true,
+      "mp4_audio_packets_timing": true,
+      "mp4_no_inband_parameters": true,
+      "mp4_hvc1_complete": true,
+      "mp4_hdr_atoms": true,
+      "mp4_configuration_nals": true,
+      "mkv_source_unchanged": true,
+      "mkv_all_images": true,
+      "mkv_seek": true,
+      "mkv_native_baseline_nals_timing": true,
+      "mkv_native_baseline_audio_timing": true,
+      "mkv_original_payloads": true,
+      "mkv_original_audio_payloads": true,
+      "mkv_pts_within_source_tick": true,
+      "mkv_no_inband_parameters": true,
+      "mkv_hvc1_complete": true,
+      "rich_source_unchanged": true,
+      "rich_all_images": true,
+      "rich_seek": true,
+      "rich_retained_nals_timing": true,
+      "rich_audio_packets_timing": true,
+      "rich_no_inband_parameters": true,
+      "rich_hvc1_complete": true,
+      "rich_configuration_nals": true,
+      "rich_fallback_chapter_artwork_identity": true,
+      "rich_three_fallbacks_present": true,
+      "rich_subtitle_packets_timing": true,
+      "rich_chapters": true,
+      "rich_track_structure_edit_lists": true,
+      "changing_parameters_native_refusal": true,
+      "negative_source_unchanged": true,
+      "windowless_inactive": true
+    },
+    "limits": [
+      "direct local queue probe; Swift service integration is tested separately",
+      "generated HDR10 only, no DV claim"
+    ],
+    "mp4": {
+      "images": [
+        48
+      ],
+      "reader_completed": true,
+      "seek_images": [
+        3
+      ]
+    },
+    "mkv": {
+      "images": [
+        48
+      ],
+      "reader_completed": true,
+      "seek_images": [
+        3
+      ],
+      "original_rational_timing_exact": false
+    },
+    "rich": {
+      "images": [
+        48
+      ],
+      "reader_completed": true,
+      "seek_images": [
+        3
+      ]
+    },
+    "observations": [
+      "0|false|2|0",
+      "0|false|2|1",
+      "0|false|2|0",
+      "0|false|2|0",
+      "0|false|2|1",
+      "0|false|2|0",
+      "0|false|2|0",
+      "0|false|2|1",
+      "0|false|2|0",
+      "0|false|2|0",
+      "0|false|2|1",
+      "0|false|2|0",
+      "0|false|2|0"
+    ]
+  },
+  "swift_suite": {
+    "total": 168,
+    "skipped": 15,
+    "failures": 0
+  },
+  "live_background_suite": {
+    "total": 7,
+    "skipped": 0,
+    "failures": 0
+  },
+  "external_observations": [
+    {
+      "samples": 191,
+      "local_windows": 0,
+      "local_frontmost": 0,
+      "installed_queue_unchanged": true
+    },
+    {
+      "samples": 169,
+      "local_windows": 0,
+      "local_frontmost": 0,
+      "installed_queue_unchanged": true
+    }
+  ],
+  "authorized_dv81_prior_run": {
+    "reused_unchanged_normalizer_evidence": true,
+    "result": {
+      "checks": {
+        "original_prefix_nals_timing": true,
+        "before_decoder_rejects": true,
+        "import_windowless": true,
+        "retained_nals_timing": true,
+        "no_inband_parameters": true,
+        "dv_hdr_atoms": true,
+        "all_original_audio_tracks": true,
+        "all_audio_packets_timing": true,
+        "every_apple_image": true,
+        "seek_images": true,
+        "closed_windowless": true,
+        "original_unchanged": true
+      },
+      "limits": [
+        "Two-second video/all-audio fixture only",
+        "Not whole-film, TV or Dolby display certification",
+        "Original native associations are not present in extracted fixture"
+      ],
+      "before_apple": {
+        "images": [],
+        "statuses": [],
+        "start_failed": true,
+        "errors": [
+          [
+            "AVFoundationErrorDomain",
+            "-11833"
+          ],
+          [
+            "NSOSStatusErrorDomain",
+            "-12906"
+          ]
+        ]
+      },
+      "before_hdr_atoms": [
+        [
+          "clli",
+          "46aae1c0ae09e0378c968919bd3cdd70a7609f157a33923db7cfa3199506dd14"
+        ],
+        [
+          "colr",
+          "e6eeed1bed3de05acd2f356aea9ad9ae57243adfed96c728e8510afad1ba7243"
+        ],
+        [
+          "dvvC",
+          "b6a39fb1f519deb57b9c3e75d13bb007fafd5a6a0f798e69b330f1f2dfe19ed5"
+        ],
+        [
+          "mdcv",
+          "197967430280b21a87fd4b23ad3c5b14d3c7105ef5e7ae65d810bed39e39025f"
+        ]
+      ],
+      "after_hdr_atoms": [
+        [
+          "clli",
+          "46aae1c0ae09e0378c968919bd3cdd70a7609f157a33923db7cfa3199506dd14"
+        ],
+        [
+          "colr",
+          "e6eeed1bed3de05acd2f356aea9ad9ae57243adfed96c728e8510afad1ba7243"
+        ],
+        [
+          "dvvC",
+          "b6a39fb1f519deb57b9c3e75d13bb007fafd5a6a0f798e69b330f1f2dfe19ed5"
+        ],
+        [
+          "mdcv",
+          "197967430280b21a87fd4b23ad3c5b14d3c7105ef5e7ae65d810bed39e39025f"
+        ]
+      ],
+      "after_apple": {
+        "images": [
+          50
+        ],
+        "statuses": [
+          2
+        ],
+        "start_failed": false,
+        "errors": []
+      },
+      "seek_apple": {
+        "images": [
+          3
+        ],
+        "statuses": [
+          1
+        ],
+        "start_failed": false,
+        "errors": []
+      },
+      "private_media_deleted": true
+    }
+  },
+  "bundles": {
+    "Subler Background.app": {
+      "path": "/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Background.app",
+      "strict_signature_verified": true
+    },
+    "Subler Automation.app": {
+      "path": "/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation.app",
+      "strict_signature_verified": true
+    }
+  },
+  "source_patch_sha256": {
+    "subler.patch": "77387520c2ba8581cab607fbbb05cf9d279e2aa88ea811e2837d15d84e74608d",
+    "mp42foundation.patch": "3d97ebacccf0fbf5bf55512efacbcafc6b04fc21323e59bc82a6c9504a8faf24"
+  },
+  "limits": [
+    "Local opt-in only; no production rollout or publication",
+    "No whole-film or TV/Dolby display certification",
+    "DV8.1 evidence reused from prior run, not a new personal-media extraction",
+    "MKV time-base conversion within one source tick, not exact rational timestamp identity",
+    "Distribution dependency-license/source assembly not cleared"
+  ]
+}

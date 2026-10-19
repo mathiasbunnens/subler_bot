@@ -8,6 +8,10 @@ xcuserdata/
 # Packaged application outputs
 dist/
 dist-update/
+dist-local/
+
+# Separately licensed native checkouts; reproducible patches are tracked instead.
+vendor-local/
 
 # Local files and secrets
 .DS_Store

@@ -1,5 +1,7 @@
 # QuickTime audio-only HEVC: investigation and remux decision
 
+Current implementation follow-up: [local-only windowless Subler route](local-subler-background.md). A separate opt-in native build now performs strict lossless packaging with generated rich-container and live Swift-service tests. The following sections retain the earlier diagnostic history; no user installation or existing film was replaced.
+
 Status: **a lossless packaging repair now produces Apple images on the authorized DV8.1 excerpt; no production correction installed**. Full-file preservation is still blocked by native track associations, not by a demonstrated need to transcode. A blanket `hev1` → `hvc1` rewrite remains rejected. The original was never modified/replaced. No Subler application/queue, watched folder, live cache, TV or LAN operation was performed.
 
 The sections below through “Sources” record the earlier metadata-only/HDR10 investigation. The authorized DV8.1 follow-up at the end supersedes its pending-permission statements; do not read earlier scope limitations as the current test result.

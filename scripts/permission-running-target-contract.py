@@ -5,7 +5,11 @@ TEXT = (Path(__file__).resolve().parents[1] / 'Sources/SublerAutomation/Services
 class RunningTargetContract(unittest.TestCase):
     def test_target_is_running_before_request(self):
         self.assertIn('launchSublerIfNeeded()', TEXT)
-        self.assertIn('runningApplications(withBundleIdentifier: "org.galad.Subler")', TEXT)
+        self.assertIn('runningApplications(withBundleIdentifier: target.bundleIdentifier)', TEXT)
+        self.assertIn('NSAppleEventDescriptor(bundleIdentifier: configuredTarget.bundleIdentifier)', TEXT)
+        self.assertIn('target.validatedApplicationURL()', TEXT)
+        self.assertIn('configuredTarget.validatedApplicationURL()', TEXT)
+        self.assertLess(TEXT.index('if request, !(await launchSublerIfNeeded())'), TEXT.index('AEDeterminePermissionToAutomateTarget'))
         self.assertIn('configuration.activates = false', TEXT)
         self.assertIn('openApplication(at:', TEXT)
     def test_missing_target_is_not_reported_as_revoked_permission(self):

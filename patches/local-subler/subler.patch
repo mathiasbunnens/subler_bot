@@ -1,0 +1,423 @@
+diff --git a/Base.lproj/MainMenu.xib b/Base.lproj/MainMenu.xib
+index d794635..02a7d9a 100755
+--- a/Base.lproj/MainMenu.xib
++++ b/Base.lproj/MainMenu.xib
+@@ -25,9 +25,6 @@
+                             </menuItem>
+                             <menuItem title="Check for Updates…" id="529">
+                                 <modifierMask key="keyEquivalentModifierMask"/>
+-                                <connections>
+-                                    <action selector="checkForUpdates:" target="530" id="531"/>
+-                                </connections>
+                             </menuItem>
+                             <menuItem title="Donate…" id="ojS-sZ-qGM">
+                                 <modifierMask key="keyEquivalentModifierMask"/>
+@@ -500,6 +497,6 @@ CA
+                 <outlet property="sendToExternalApp" destination="597" id="Kz4-8d-I4D"/>
+             </connections>
+         </customObject>
+-        <customObject id="530" customClass="SPUStandardUpdaterController"/>
++
+     </objects>
+ </document>
+diff --git a/Classes/AppDelegate.swift b/Classes/AppDelegate.swift
+index 00f3060..6a23d9e 100644
+--- a/Classes/AppDelegate.swift
++++ b/Classes/AppDelegate.swift
+@@ -152,20 +152,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+     }
+ 
+     func applicationWillFinishLaunching(_ notification: Notification) {
++        NSApp.setActivationPolicy(.prohibited)
+         Prefs.register()
+         MetadataPrefs.register()
+ 
+         _ = documentController
+-        _ = activityWindowController
+ 
+         logger.clear()
+         MP42File.setGlobalLogger(logger)
+ 
+         _ = QueueController.shared
+ 
+-        if Prefs.showQueueWindow {
+-            QueueController.shared.showWindow(self)
+-        }
++
+         
+         if #available(macOS 10.15, *) {
+             sendToExternalApp.title = NSLocalizedString("Send to TV", comment: "Send to tv app menu item")
+@@ -173,43 +171,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+     }
+ 
+     func applicationDidFinishLaunching(_ notification: Notification) {
++        NSApp.setActivationPolicy(.prohibited)
+         //if Prefs.suppressDonationAlert == false {
+         //    runDonateAlert()
+         //}
+     }
+ 
+     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+-        let state = QueueController.shared.status
+-
+-        if state == .working {
+-            let alert = NSAlert()
+-            alert.messageText = NSLocalizedString("Are you sure you want to quit Subler?", comment: "Quit alert title.")
+-            alert.informativeText = NSLocalizedString("Your current queue will be lost. Do you want to quit anyway?", comment: "Quit alert description.")
+-            alert.addButton(withTitle: NSLocalizedString("Quit", comment: "Quit alert default action."))
+-            alert.addButton(withTitle: NSLocalizedString("Don't Quit", comment: "Quit alert cancel action."))
+-            alert.alertStyle = .critical
+-
+-            let result = alert.runModal()
+-            return result == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+-
+-        }
+-        return .terminateNow
++        return QueueController.shared.status == .working ? .terminateCancel : .terminateNow
+     }
+ 
+     func applicationWillTerminate(_ notification: Notification) {
+         do {
+-            try PresetManager.shared.save()
+             try QueueController.shared.saveToDisk()
+         } catch {
+             logger.write(toLog: "Failed to save queue to disk!")
+         }
+-        Prefs.showQueueWindow = QueueController.shared.window?.isVisible ?? false
++
+     }
+ 
+     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool {
+-        if Prefs.showOpenPanelAtLaunch {
+-            documentController.openDocument(self)
+-        }
++        return false
++    }
++
++    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
++        NSApp.setActivationPolicy(.prohibited)
+         return false
+     }
+ 
+diff --git a/Classes/Document.swift b/Classes/Document.swift
+index a8dc15b..a9310d1 100644
+--- a/Classes/Document.swift
++++ b/Classes/Document.swift
+@@ -12,6 +12,17 @@ import MP42Foundation
+ @objc(SBDocument)
+ final class Document: NSDocument {
+ 
++    // Local-only background build: no NSWindow is needed for script identity.
++    private static var nextUniqueID = 0
++    private static let tokenLock = NSLock()
++    private static func allocateToken() -> Int {
++        tokenLock.lock()
++        defer { tokenLock.unlock() }
++        nextUniqueID += 1
++        return nextUniqueID
++    }
++    @objc dynamic let uniqueID = Document.allocateToken()
++
+     private(set) var mp4: MP42File
+     private var unsupportedMp4Brand: Bool
+ 
+@@ -42,15 +53,7 @@ final class Document: NSDocument {
+     }
+ 
+     override func makeWindowControllers() {
+-        let documentWindowController = DocumentWindowController()
+-        addWindowController(documentWindowController)
+-        documentWindowController.showWindow(self)
+-
+-        if let url = fileURL, unsupportedMp4Brand {
+-            // We can't edit this file, so ask the user if it wants to import it
+-            documentWindowController.showImportSheet(fileURLs: [url])
+-            fileURL = nil
+-        }
++        // Intentionally windowless in this separate local-only build.
+     }
+ 
+     // MARK: Read
+diff --git a/Classes/Logger.swift b/Classes/Logger.swift
+index af17a70..aefe42d 100644
+--- a/Classes/Logger.swift
++++ b/Classes/Logger.swift
+@@ -87,7 +87,7 @@ final class Logger : NSObject, MP42Logging {
+     private static func appSupportURL() -> URL {
+         let fileManager = FileManager.default
+         if let url = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+-            .first?.appendingPathComponent("Subler") {
++            .first?.appendingPathComponent("SublerAutomationLocal") {
+ 
+             do {
+                 if fileManager.fileExists(atPath: url.path) == false {
+diff --git a/Classes/OCRManager.swift b/Classes/OCRManager.swift
+index c6d799c..69a24d3 100644
+--- a/Classes/OCRManager.swift
++++ b/Classes/OCRManager.swift
+@@ -230,7 +230,7 @@ final class OCRManager {
+     }
+ 
+     private lazy var destinationURL = {
+-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Subler", isDirectory: true).appendingPathComponent("tessdata", isDirectory: true).appendingPathComponent("v4", isDirectory: true)
++        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("SublerAutomationLocal", isDirectory: true).appendingPathComponent("tessdata", isDirectory: true).appendingPathComponent("v4", isDirectory: true)
+     }()
+ 
+     private lazy var baseURL = {
+diff --git a/Classes/Preset.swift b/Classes/Preset.swift
+index 647372a..a581884 100644
+--- a/Classes/Preset.swift
++++ b/Classes/Preset.swift
+@@ -18,7 +18,7 @@ protocol Preset: NSSecureCoding, NSCopying {
+ extension Preset {
+ 
+     private func appSupportURL() -> URL? {
+-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Subler")
++        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("SublerAutomationLocal")
+     }
+ 
+     var fileURL: URL {
+diff --git a/Classes/PresetManager.swift b/Classes/PresetManager.swift
+index b6e96b1..8efcb5c 100644
+--- a/Classes/PresetManager.swift
++++ b/Classes/PresetManager.swift
+@@ -99,7 +99,7 @@ final class PresetManager {
+     }
+ 
+     private func appSupportURL() -> URL? {
+-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Subler")
++        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("SublerAutomationLocal")
+     }
+ 
+     private func version(of fileURL: URL) -> Int? {
+diff --git a/Classes/Queue.swift b/Classes/Queue.swift
+index 0aa8a18..c14cc7a 100644
+--- a/Classes/Queue.swift
++++ b/Classes/Queue.swift
+@@ -163,6 +163,7 @@ final class Queue {
+                         self.logger.write(toLog: currentItem.fileURL.lastPathComponent + " failed")
+                     } else if .cancelled == result {
+                         self.logger.write(toLog: currentItem.fileURL.lastPathComponent + " cancelled")
++                        self.arrayQueue.sync { self.statusInternal = .completed }
+                         break
+                     }
+                 } else {
+@@ -170,9 +171,6 @@ final class Queue {
+                 }
+             }
+             self.enableSleep()
+-            self.arrayQueue.sync {
+-                self.statusInternal = .completed
+-            }
+             self.handleSBStatusCompleted(completed: completed, failed: failed)
+         }
+     }
+@@ -210,6 +208,10 @@ final class Queue {
+             return arrayQueue.sync {
+                 let first = items.first(where: { $0.status == .ready })
+                 first?.status = .working
++                // Commit the idle transition atomically with the empty check.
++                // Otherwise append + start can observe .working after the last
++                // scan and lose the only start request for the next item.
++                if first == nil { self.statusInternal = .completed }
+                 return first
+             }
+         }
+diff --git a/Classes/QueueController.swift b/Classes/QueueController.swift
+index b74ed24..2d29478 100644
+--- a/Classes/QueueController.swift
++++ b/Classes/QueueController.swift
+@@ -49,7 +49,7 @@ final class QueueController : NSWindowController, NSWindowDelegate, NSPopoverDel
+             fatalError("Invalid queue url")
+         }
+         super.init(window: nil)
+-        _ = window
++        // The local build never loads the queue nib or asks for notifications.
+     }
+ 
+     required init?(coder: NSCoder) {
+@@ -404,6 +404,14 @@ final class QueueController : NSWindowController, NSWindowDelegate, NSPopoverDel
+         if items.isEmpty { return }
+         guard let firstIndex = indexes.first else { fatalError() }
+ 
++        if !isWindowLoaded {
++            for (offset, item) in items.enumerated() {
++                queue.insert(item, at: firstIndex + offset)
++            }
++            try? queue.saveToDisk()
++            return
++        }
++
+         table.beginUpdates()
+ 
+         // Forward
+@@ -442,6 +450,11 @@ final class QueueController : NSWindowController, NSWindowDelegate, NSPopoverDel
+     }
+ 
+     func remove(at indexes: IndexSet) {
++        if !isWindowLoaded {
++            queue.remove(at: indexes)
++            try? queue.saveToDisk()
++            return
++        }
+         if indexes.isEmpty {
+             return
+         }
+@@ -651,6 +664,10 @@ final class QueueController : NSWindowController, NSWindowDelegate, NSPopoverDel
+     }
+ 
+     @IBAction func start(_ sender: Any?) {
++        if !isWindowLoaded {
++            queue.start()
++            return
++        }
+         if queue.status == .working {
+             return
+         }
+diff --git a/Classes/QueuePreferences.swift b/Classes/QueuePreferences.swift
+index 544e48c..e24f5ea 100644
+--- a/Classes/QueuePreferences.swift
++++ b/Classes/QueuePreferences.swift
+@@ -214,6 +214,6 @@ final class QueuePreferences: NSObject {
+     }
+ 
+     var queueURL: URL? {
+-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Subler").appendingPathComponent("queue.sbqueue", isDirectory: false)
++        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("SublerAutomationLocal").appendingPathComponent("queue.sbqueue", isDirectory: false)
+     }
+ }
+diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
+index 879eaf2..6c3aaf9 100644
+--- a/Classes/ScriptCommand.swift
++++ b/Classes/ScriptCommand.swift
+@@ -13,6 +13,10 @@ import MP42Foundation
+ protocol ScriptCommandDocumentTargeting {}
+ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
+     func targetedDocument() -> Document? {
++        if let token = self.evaluatedArguments?["ownedToken"] as? Int {
++            return NSDocumentController.shared.documents.compactMap { $0 as? Document }
++                .first { $0.uniqueID == token }
++        }
+         // First, check for explicit document parameters ('into' or 'doc')
+         if let evaluatedArgs = self.evaluatedArguments {
+             if let doc = evaluatedArgs["into"] as? Document {
+@@ -60,6 +64,55 @@ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
+     }
+ }
+ 
++@objc(SBImportBackgroundFileScriptCommand)
++class SBImportBackgroundFileScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
++    override func performDefaultImplementation() -> Any? {
++        guard let path = extractFilePath() else {
++            scriptErrorNumber = -1700
++            scriptErrorString = "Expected a source file."
++            return nil
++        }
++        do {
++            let url = URL(fileURLWithPath: path)
++            let importer = try MP42FileImporter(url: url)
++            guard !importer.tracks.isEmpty,
++                  importer.tracks.allSatisfy({ isTrackMuxable($0.format) && $0.conversionSettings == nil && $0.sampleDescriptions.count <= 1 }) else {
++                scriptErrorNumber = -10000
++                scriptErrorString = "Background import refuses tracks requiring conversion."
++                return nil
++            }
++            let doc = Document()
++            for track in importer.tracks {
++                if let audio = track as? MP42AudioTrack { audio.name = audio.prettyTrackName }
++                doc.mp4.addTrack(track)
++            }
++            doc.mp4.metadata.merge(importer.metadata, overwrite: true)
++            doc.fileURL = url // Search fallback; the queue writes a distinct destination.
++            NSDocumentController.shared.addDocument(doc)
++            return String(doc.uniqueID)
++        } catch {
++            scriptErrorNumber = -10000
++            scriptErrorString = "Background import failed."
++            return nil
++        }
++    }
++}
++
++@objc(SBHasBackgroundDocumentScriptCommand)
++class SBHasBackgroundDocumentScriptCommand: NSScriptCommand {
++    override func performDefaultImplementation() -> Any? {
++        guard let token = directParameter as? Int else { return false }
++        return NSDocumentController.shared.documents.compactMap { $0 as? Document }.contains { $0.uniqueID == token }
++    }
++}
++
++@objc(SBBackgroundStateScriptCommand)
++class SBBackgroundStateScriptCommand: NSScriptCommand {
++    override func performDefaultImplementation() -> Any? {
++        return "\(NSApp.windows.count)|\(NSApp.isActive)|\(NSApp.activationPolicy().rawValue)|\(NSDocumentController.shared.documents.count)"
++    }
++}
++
+ @objc(SBImportFileScriptCommand)
+ class SBImportFileScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
+     
+@@ -440,6 +493,8 @@ class SBSendToQueueScriptCommand: NSScriptCommand, ScriptCommandDocumentTargetin
+         options[MP4264BitTime] = Prefs.mp464bitTimes
+         
+         // Create queue item and add to queue
++        options[MP42ForceHvc1] = true
++        options["MP42StrictHvc1"] = true
+         let item = QueueItem(mp4: sublerDoc.mp4, destURL: destinationURL, attributes: options, optimize: Prefs.mp4SaveAsOptimize)
+         
+         // Add the queue item
+diff --git a/Subler.sdef b/Subler.sdef
+index 10e6f09..3f4ea77 100644
+--- a/Subler.sdef
++++ b/Subler.sdef
+@@ -10,6 +10,20 @@
+         <!-- Commands -->
+ 
+         <!-- File Commands -->
++        <command name="has background document" code="SublBgEx" description="Whether this exact owned token still refers to a document.">
++            <cocoa class="SBHasBackgroundDocumentScriptCommand" />
++            <direct-parameter type="integer" />
++            <result type="boolean" />
++        </command>
++        <command name="background state" code="SublBgSt" description="Report window count, active state, activation policy and document count for the local test harness.">
++            <cocoa class="SBBackgroundStateScriptCommand" />
++            <result type="text" />
++        </command>
++        <command name="import background file" code="SublBgIm" description="Import losslessly without constructing a window; return the owned document ID.">
++            <cocoa class="SBImportBackgroundFileScriptCommand" />
++            <direct-parameter type="file" description="The source file." />
++            <result type="text" description="The opaque owned document token (decimal text, never localized)." />
++        </command>
+         <command name="import file" code="SublFilI" description="Import a file into the active document.">
+             <cocoa class="SBImportFileScriptCommand" />
+             <direct-parameter description="The file to import.">
+@@ -32,11 +46,13 @@
+                 <type type="file" />
+             </direct-parameter>
+             <parameter name="doc" code="docu" type="document" optional="yes" description="The target document to send to queue." />
++            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
+         </command>
+ 
+         <command name="close document" code="SublClos" description="Close the active document window without prompting for unsaved changes.">
+             <cocoa class="SBCloseFileScriptCommand" />
+             <parameter name="doc" code="docu" type="document" optional="yes" description="The target document to close." />
++            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
+         </command>
+ 
+         <!-- Metadata Commands -->
+@@ -48,6 +64,7 @@
+         <command name="fetch metadata candidates" code="SublFRes" description="Fetch metadata results without applying them.">
+             <cocoa class="SBFetchMetadataResultsScriptCommand" />
+             <parameter name="into" code="into" type="document" optional="yes" description="The target document to fetch metadata candidates for." />
++            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
+             <parameter name="limit" code="limt" type="integer" optional="yes" description="Maximum number of results to return." />
+             <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
+             <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
+@@ -62,6 +79,7 @@
+                 <type type="integer" />
+             </direct-parameter>
+             <parameter name="into" code="into" type="document" optional="yes" description="The target document to set metadata for." />
++            <parameter name="owned token" code="bgtk" type="integer" optional="yes"><cocoa key="ownedToken" /></parameter>
+             <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
+             <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
+         </command>

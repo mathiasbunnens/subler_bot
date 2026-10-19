@@ -1,0 +1,239 @@
+diff --git a/MP42/MP42File.m b/MP42/MP42File.m
+index 5e6ce9d..7ade2cb 100644
+--- a/MP42/MP42File.m
++++ b/MP42/MP42File.m
+@@ -1069,8 +1069,7 @@ - (BOOL)updateMP4FileWithOptions:(nullable NSDictionary<NSString *, id> *)option
+         }
+     }
+ 
+-    [self.muxer setup:outError];
+-    [self.muxer work];
++    BOOL muxSucceeded = [self.muxer setup:outError] && [self.muxer work:outError];
+     self.muxer = nil;
+ 
+     // Remove the unsupported tracks from the array of the tracks
+@@ -1094,6 +1093,11 @@ - (BOOL)updateMP4FileWithOptions:(nullable NSDictionary<NSString *, id> *)option
+ #endif
+     [self.importers removeAllObjects];
+ 
++    if (!muxSucceeded) {
++        [self stopWriting];
++        return NO;
++    }
++
+     // Update moov atom
+     updateMoovDuration(self.fileHandle);
+     updateMajorBrand(self.fileHandle, self.URL);
+diff --git a/MP42/MP42Muxer.h b/MP42/MP42Muxer.h
+index 606da2c..fb4fbf0 100644
+--- a/MP42/MP42Muxer.h
++++ b/MP42/MP42Muxer.h
+@@ -28,7 +28,7 @@ MP42_OBJC_DIRECT_MEMBERS
+ - (void)addTrack:(MP42Track *)track;
+ 
+ - (BOOL)setup:(NSError * __autoreleasing *)outError;
+-- (void)work;
++- (BOOL)work:(NSError * __autoreleasing *)outError;
+ - (void)cancel;
+ 
+ @end
+diff --git a/MP42/MP42Muxer.m b/MP42/MP42Muxer.m
+index fdcfdb4..e92f628 100644
+--- a/MP42/MP42Muxer.m
++++ b/MP42/MP42Muxer.m
+@@ -23,6 +23,7 @@
+ #import "MP42Track+Private.h"
+ 
+ #include <stdatomic.h>
++#include "MP42StrictHEVC.h"
+ 
+ MP42_OBJC_DIRECT_MEMBERS
+ @implementation MP42Muxer
+@@ -34,6 +35,7 @@ @implementation MP42Muxer
+ 
+     NSMutableArray<MP42Track *> *_activeTracks;
+     NSDictionary<NSString *, id> *_options;
++    NSMutableDictionary<NSNumber *, NSData *> *_strictHEVCCookies;
+ 
+     dispatch_semaphore_t _setupDone;
+     int32_t              _cancelled;
+@@ -44,6 +46,7 @@ - (instancetype)init
+ {
+     if ((self = [super init])) {
+         _activeTracks = [[NSMutableArray alloc] init];
++        _strictHEVCCookies = [NSMutableDictionary dictionary];
+     }
+     return self;
+ }
+@@ -104,6 +107,20 @@ - (BOOL)setup:(NSError * __autoreleasing *)outError
+             continue;
+         }
+ 
++        if ([_options[@"MP42StrictHvc1"] boolValue] &&
++            (format == kMP42VideoCodecType_HEVC || format == kMP42VideoCodecType_HEVC_PSinBitstream ||
++             format == kMP42VideoCodecType_DolbyVisionHEVC || format == kMP42VideoCodecType_DolbyVisionHEVC_PSinBitstream)) {
++            MP42VideoTrack *video = (MP42VideoTrack *)track;
++            BOOL supportedDV = video.dolbyVision.versionMajor == 0 ||
++                (video.dolbyVision.profile == 8 && video.dolbyVision.blSignalCompatibilityId == 1 &&
++                 video.dolbyVision.blPresentFlag && video.dolbyVision.rpuPresentFlag && !video.dolbyVision.elPresentFlag);
++            if (!supportedDV || video.dolbyVisionELConfiguration || !MP42HEVCConfig(magicCookie.bytes, magicCookie.length)) {
++                if (outError) *outError = MP42Error(@"Strict HEVC packaging refused", @"Unsupported or ambiguous configuration; no transcode fallback.", 220);
++                dispatch_semaphore_signal(_setupDone);
++                return NO;
++            }
++        }
++
+         // Setup the converters
+         if ([track isMemberOfClass:[MP42AudioTrack class]] && track.conversionSettings) {
+             MP42AudioConverter *audioConverter = [[MP42AudioConverter alloc] initWithTrack:(MP42AudioTrack *)track
+@@ -658,6 +675,11 @@ - (BOOL)setup:(NSError * __autoreleasing *)outError
+         if (dstTrackId) {
+             MP4SetTrackDurationPerChunk(_fileHandle, dstTrackId, timeScale / 8);
+             track.trackId = dstTrackId;
++            if ([_options[@"MP42StrictHvc1"] boolValue] &&
++                (format == kMP42VideoCodecType_HEVC || format == kMP42VideoCodecType_HEVC_PSinBitstream ||
++                 format == kMP42VideoCodecType_DolbyVisionHEVC || format == kMP42VideoCodecType_DolbyVisionHEVC_PSinBitstream)) {
++                _strictHEVCCookies[@(dstTrackId)] = [magicCookie copy];
++            }
+         }
+     }
+ 
+@@ -668,15 +690,16 @@ - (BOOL)setup:(NSError * __autoreleasing *)outError
+     return YES;
+ }
+ 
+-- (void)work
++- (BOOL)work:(NSError * __autoreleasing *)outError
+ {
+     if (!_activeTracks.count) {
+-        return;
++        return YES;
+     }
+ 
+     NSArray<MP42FileImporter *> *trackImportersArray = self.fileImporters;
+     NSUInteger done = 0, update = 0;
+     CGFloat progress = 0;
++    NSError *failure = nil; // Retain across the per-batch autorelease pool.
+ 
+     for (MP42FileImporter *importerHelper in trackImportersArray) {
+         [importerHelper startReading];
+@@ -712,6 +735,12 @@ - (void)work
+                         break;
+                     }
+                     else {
++                        NSData *cookie = _strictHEVCCookies[@(trackId)];
++                        if (cookie && !MP42HEVCNormalize(cookie.bytes, cookie.length, sampleBuffer->data, &sampleBuffer->size)) {
++                            failure = MP42Error(@"Strict HEVC packaging refused", @"Changing, layered or malformed in-band parameters; output must not be published.", 221);
++                            _cancelled = YES;
++                            break;
++                        }
+                         bool err = false;
+                         if (sampleBuffer->dependecyFlags) {
+                             err = MP4WriteSampleDependency(_fileHandle, trackId, sampleBuffer->data, sampleBuffer->size,
+@@ -789,7 +818,11 @@ - (void)work
+             for (MP42Track *track in importerHelper.outputsTracks)
+                 [importerHelper cleanUp:track fileHandle:_fileHandle];
+         }
++    } else {
++        for (MP42FileImporter *importerHelper in trackImportersArray) [importerHelper cancelReading];
+     }
++    if (failure && outError) *outError = failure;
++    return !_cancelled;
+ }
+ 
+ - (void)cancel
+diff --git a/MP42/MP42StrictHEVC.h b/MP42/MP42StrictHEVC.h
+new file mode 100644
+index 0000000..fecaeb0
+--- /dev/null
++++ b/MP42/MP42StrictHEVC.h
+@@ -0,0 +1,89 @@
++/* Local Subler Automation experiment. GPL-2.0-or-later.
++ * Remove only byte-equivalent in-band VPS/SPS/PPS. No encode or RPU/SEI edits.
++ * Fail closed on malformed/changing parameters, layers or parameter-only samples.
++ */
++#ifndef MP42_STRICT_HEVC_H
++#define MP42_STRICT_HEVC_H
++#include <stdbool.h>
++#include <stdint.h>
++#include <stddef.h>
++#include <string.h>
++
++static bool MP42HEVCConfig(const uint8_t *c, size_t n) {
++    if (!c || n < 23 || c[0] != 1) return false;
++    size_t p = 23;
++    unsigned seen = 0;
++    for (unsigned a = 0; a < c[22]; a++) {
++        if (n - p < 3) return false;
++        unsigned type = c[p++] & 63;
++        unsigned count = (c[p] << 8) | c[p+1]; p += 2;
++        if (type >= 32 && type <= 34) {
++            unsigned bit = 1u << (type - 32);
++            if (count != 1 || (seen & bit)) return false;
++            seen |= bit;
++        }
++        for (unsigned k = 0; k < count; k++) {
++            if (n - p < 2) return false;
++            size_t len = (c[p] << 8) | c[p+1]; p += 2;
++            if (len < 2 || len > n - p) return false;
++            if (((c[p] >> 1) & 63) != type || (c[p] & 0x81) ||
++                (c[p+1] & 0xf8) || !(c[p+1] & 7)) return false;
++            p += len;
++        }
++    }
++    return p == n && seen == 7;
++}
++
++static bool MP42HEVCMatches(const uint8_t *c, size_t n, const uint8_t *nal, size_t len) {
++    // Caller has validated the complete hvcC, so every read below is bounded.
++    (void)n;
++    size_t p = 23;
++    for (unsigned a = 0; a < c[22]; a++) {
++        unsigned type = c[p++] & 63;
++        unsigned count = (c[p] << 8) | c[p+1]; p += 2;
++        for (unsigned k = 0; k < count; k++) {
++            size_t size = (c[p] << 8) | c[p+1]; p += 2;
++            if (type == ((nal[0] >> 1) & 63) && size == len && !memcmp(c+p, nal, len)) return true;
++            p += size;
++        }
++    }
++    return false;
++}
++
++static bool MP42HEVCNormalize(const uint8_t *c, size_t n, uint8_t *sample, uint32_t *size) {
++    if (!size || !sample || !MP42HEVCConfig(c, n)) return false;
++    unsigned width = (c[21] & 3) + 1;
++    size_t end = *size, kept = 0;
++    // Validate the WHOLE sample before making any change.
++    for (size_t p = 0; p < end;) {
++        if (end - p < width) return false;
++        uint32_t len = 0;
++        for (unsigned b = 0; b < width; b++) len = (len << 8) | sample[p+b];
++        p += width;
++        if (len < 2 || len > end - p) return false;
++        const uint8_t *nal = sample+p;
++        if ((nal[0] & 0x81) || (nal[1] & 0xf8) || !(nal[1] & 7)) return false;
++        unsigned type = (nal[0] >> 1) & 63;
++        if (type >= 32 && type <= 34) {
++            if (!MP42HEVCMatches(c, n, nal, len)) return false;
++        } else {
++            kept += width + len;
++        }
++        p += len;
++    }
++    if (!kept) return false;
++    size_t write = 0;
++    for (size_t p = 0; p < end;) {
++        uint32_t len = 0;
++        for (unsigned b = 0; b < width; b++) len = (len << 8) | sample[p+b];
++        unsigned type = (sample[p+width] >> 1) & 63;
++        if (type < 32 || type > 34) {
++            memmove(sample+write, sample+p, width+len);
++            write += width+len;
++        }
++        p += width+len;
++    }
++    *size = (uint32_t)write;
++    return true;
++}
++#endif

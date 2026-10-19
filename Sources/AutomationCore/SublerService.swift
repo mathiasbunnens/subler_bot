@@ -12,7 +12,7 @@ public struct MetadataCandidate: Codable, Identifiable, Equatable, Sendable {
 }
 
 public struct SublerDocument: Codable, Sendable {
-    /// Opaque native window ID: Subler 1.9.5 advertises a document ID whose uniqueID accessor is broken.
+    /// Owned token in the local background build; window ID in installed 1.9.5.
     public let id: Int
     public init(id: Int) { self.id = id }
 }
@@ -20,13 +20,26 @@ public struct SublerDocument: Codable, Sendable {
 public actor SublerService {
     private var sources: [Int: URL] = [:]
     private var converting = false
-    public init() {}
+    private let target: SublerTarget
+    public init(target: SublerTarget = SublerTarget()) { self.target = target }
 
     public func prepare(source: URL) async throws -> SublerDocument {
         guard source.isFileURL, FileManager.default.isReadableFile(atPath: source.path) else {
             throw AutomationServiceError.message("Source is not a readable local file: \(source.path)")
         }
         let path = AppleScriptService.literal(source.path)
+        if target.isBackground {
+            let result = try await AppleScriptService.run("""
+            tell \(try target.applicationClause())
+                set backgroundState to background state
+                if backgroundState does not start with "0|false|2|" then error "Local Subler is not windowless and inactive."
+                return import background file (POSIX file \(path))
+            end tell
+            """)
+            guard let id = Int(result), id > 0 else { throw AutomationServiceError.message("Local Subler did not return an owned token.") }
+            sources[id] = source
+            return SublerDocument(id: id)
+        }
         let result = try await AppleScriptService.run("""
         tell application id "org.galad.Subler"
             set ownedDoc to make new document
@@ -56,8 +69,8 @@ public actor SublerService {
     public func candidates(document: SublerDocument) async throws -> [MetadataCandidate] {
         guard sources[document.id] != nil else { throw AutomationServiceError.message("Document is not owned by this service.") }
         let result = try await AppleScriptService.run("""
-        tell application id "org.galad.Subler"
-            set resultsList to fetch metadata candidates into (document of window id \(document.id)) limit 50
+        tell \(try target.applicationClause())
+            set resultsList to fetch metadata candidates \(target.documentArgument(document.id, role: "into")) limit 50
             set resultText to ""
             repeat with resultLine in resultsList
                 set resultText to resultText & (resultLine as text) & linefeed
@@ -76,7 +89,7 @@ public actor SublerService {
 
     private func queueItem(destination: URL) async throws -> (id: String, state: String)? {
         let result = try await AppleScriptService.run("""
-        tell application id "org.galad.Subler"
+        tell \(try target.applicationClause())
             set matchingIndex to 0
             repeat with queueIndex from 1 to count of queue items
                 if destinationPath of queue item queueIndex is \(AppleScriptService.literal(destination.path)) then
@@ -124,22 +137,22 @@ public actor SublerService {
                 throw AutomationServiceError.message("Destination already exists and will not be overwritten: \(destination.path)")
             }
             _ = try await AppleScriptService.run("""
-            tell application id "org.galad.Subler"
+            tell \(try target.applicationClause())
                 repeat with queueIndex from 1 to count of queue items
                     if status of queue item queueIndex is ready or status of queue item queueIndex is working then error "Subler contains a foreign ready or working queue item. Leave it untouched and retry when the queue is idle."
                 end repeat
-                \(candidate.map { "fetch and set metadata candidate \($0.index) into (document of window id \(document.id))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
+                \(candidate.map { "fetch and set metadata candidate \($0.index) \(target.documentArgument(document.id, role: "into"))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
             end tell
             """, timeout: 300)
             // The native setter searches synchronously, then schedules its merge on the main queue.
             // A separate Apple Event follows it; actual persisted tags are checked before success.
             _ = try await AppleScriptService.run("""
-            tell application id "org.galad.Subler"
+            tell \(try target.applicationClause())
                 repeat with queueIndex from 1 to count of queue items
                     if status of queue item queueIndex is ready or status of queue item queueIndex is working then error "Subler contains a foreign ready or working queue item; enqueue aborted."
                     if destinationPath of queue item queueIndex is \(AppleScriptService.literal(destination.path)) then error "Destination was queued concurrently; enqueue aborted."
                 end repeat
-                send to queue (POSIX file \(AppleScriptService.literal(destination.path))) doc (document of window id \(document.id))
+                send to queue (POSIX file \(AppleScriptService.literal(destination.path))) \(target.documentArgument(document.id, role: "doc"))
             end tell
             """, timeout: 60)
             ownedItem = try await queueItem(destination: destination)
@@ -147,7 +160,7 @@ public actor SublerService {
                 throw AutomationServiceError.message("Subler did not create the expected ready queue item for \(destination.path).")
             }
             _ = try await AppleScriptService.run("""
-            tell application id "org.galad.Subler"
+            tell \(try target.applicationClause())
                 set ownedIndex to 0
                 repeat with queueIndex from 1 to count of queue items
                     if (id of queue item queueIndex) is \(AppleScriptService.literal(item.id)) then
@@ -187,7 +200,22 @@ public actor SublerService {
     }
 
     public func close(document: SublerDocument) async {
-        guard sources.removeValue(forKey: document.id) != nil else { return }
+        guard sources[document.id] != nil else { return }
+        if target.isBackground {
+            let result = try? await AppleScriptService.run("""
+            tell \(try target.applicationClause())
+                if has background document \(document.id) then close document owned token \(document.id)
+                repeat 100 times
+                    if not (has background document \(document.id)) then return "closed"
+                    delay 0.02
+                end repeat
+                error "Owned background document did not close."
+            end tell
+            """, timeout: 30)
+            if result == "closed" { sources.removeValue(forKey: document.id) }
+            return
+        }
+        sources.removeValue(forKey: document.id)
         _ = try? await AppleScriptService.run("""
         tell application id "org.galad.Subler"
             if exists (window id \(document.id)) then close document doc (document of window id \(document.id))
