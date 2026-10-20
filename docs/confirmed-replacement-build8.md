@@ -40,4 +40,16 @@ Run only the replacement test with both explicit opt-ins; do not enable the enti
 
 The test leaves its exact UUID directory, synthetic final, subtitle, backups and journal for independent inspection. No recursive cleanup is performed. A successful result certifies only the tested server/filesystem happy path, not multi-client compare-and-swap or disconnect atomicity.
 
-Bundle path, exact source commit, signature and SHA-256 evidence will be recorded after building the separate candidate; no successful build is claimed in this pre-build source report.
+## Built candidate and provenance
+
+- Source commit: `7ed5a9f775e9e089978d8534ea7780078c4c679d` (local only, no push). The report-only commit following it does not change the built Sources.
+- Built successfully with `SUBLER_BUILD_LOCAL_ENGINE=1 SUBLER_BUILD_APP="$PWD/dist-local/Subler Automation Replacement Preview.app" ./build.sh`. Build log: `/Users/mathiasbunnens/.hermes/profiles/codex-dev-2/cache/scratch/t_cc77a812-build8.log`.
+- Candidate: `/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation Replacement Preview.app`, version 1.1.0 build 8. Retains `com.mathiasbunnens.SublerAutomation.Local`; original sibling `/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Background.app` is required and unchanged. No normal app activation was performed.
+- `test-bundle-engine.py` on the actual signed candidate: valid=true, background=true, exact original co-local engine, sourceDirty=false, exact source commit. Missing sibling in an isolated signed copy fails closed. Diagnostic mode does not initialize the user's queue or restart the engine.
+- `version-contract.py` with SUBLER_BUILD_APP: three checks pass, including source plist/version, embedded source commit and unsigned Mach-O equality with the release executable. This HEAD-sensitive check was run at the source commit, before this report-only update.
+- Strict/deep codesign verification passes for candidate, running build-7 caller, and unchanged sibling Background engine. Local ad-hoc signing, not notarization. Candidate designated cdhash: `799efa4942793db57997de391644e2ea178c590a`.
+- Candidate signed executable SHA-256: `1dd15b49f3e0405639056d696c7752ce76c444729d60099210df36e5831456b1`.
+- Original sibling engine executable SHA-256: `ed75ed860da1d1e2139292c2c692cdfca6bbacd8802fc9a1c824ba62c46369fb`.
+- The unrelated untracked `.vscode/` and `.worktrees/` remain excluded from commits. No process was stopped/restarted, no TCC database was modified, and no personal/server media was touched.
+
+Handoff remains blocked for explicit bounded scratch-SMB permission and the strict multi-client no-displacement guarantee described above. A working APFS preview is not final acceptance of those outstanding criteria; do not silently close the card or activate the candidate.
