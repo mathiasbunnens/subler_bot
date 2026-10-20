@@ -3,6 +3,13 @@ import XCTest
 @testable import AutomationCore
 
 final class AppVersionTests: XCTestCase {
+    func testLocalBuildLabelAndCommitAreVisible() {
+        let version = AppVersion(infoDictionary: ["CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "5",
+            "CFBundleDisplayName": "Subler Automation Local", "SublerAutomationCommit": "1234567890abcdef"])
+        XCTAssertEqual(version.label, "Subler Automation Local · v1.1.0")
+        XCTAssertEqual(version.details, "Version 1.1.0 (build 5) · 1234567")
+    }
+
     func testMissingOrEmptyMetadataDoesNotClaimAnInstalledVersion() {
         for info: [String: Any]? in [nil, [:], ["CFBundleShortVersionString": "  ", "CFBundleVersion": "2"]] {
             let version = AppVersion(infoDictionary: info)

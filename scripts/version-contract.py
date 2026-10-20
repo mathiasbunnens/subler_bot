@@ -41,7 +41,16 @@ class VersionContracts(unittest.TestCase):
         import subprocess
         import tempfile
         app = Path(os.environ['SUBLER_BUILD_APP'])
-        self.assertEqual(plistlib.loads((app / 'Contents/Info.plist').read_bytes()), plistlib.loads(PLIST.read_bytes()))
+        built = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
+        expected = plistlib.loads(PLIST.read_bytes())
+        self.assertEqual(built.pop('SublerAutomationCommit'), subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip())
+        self.assertIsInstance(built.pop('SublerAutomationSourceDirty'), bool)
+        if built.get('SublerAutomationEngine') == 'background':
+            expected.update(CFBundleName='Subler Automation Local', CFBundleDisplayName='Subler Automation Local',
+                            CFBundleIdentifier='com.mathiasbunnens.SublerAutomation.Local',
+                            SublerAutomationEngine='background', SublerAutomationBackgroundRelativePath='../Subler Background.app')
+            expected.pop('NSServices')
+        self.assertEqual(built, expected)
         bin_path = subprocess.check_output(['swift', 'build', '-c', 'release', '--show-bin-path'], cwd=ROOT, text=True).strip()
         # Signing the bundle legitimately changes Mach-O signature bytes.
         # Compare unsigned copies, never modify either original executable.

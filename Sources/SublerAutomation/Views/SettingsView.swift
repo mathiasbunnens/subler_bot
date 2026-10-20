@@ -60,12 +60,15 @@ struct SettingsView: View {
     private var hasChanges: Bool { draft.differsForEditing(from: queue.settings) }
     var body: some View {
         VStack(spacing: 0) {
-            Text(AppVersion.current.label)
-                .font(.headline)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                .help(AppVersion.current.details)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AppVersion.current.label).font(.headline)
+                Text(AppVersion.current.details).font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            .help(AppVersion.current.details)
             TabView {
                 general.tabItem { Label("Général", systemImage: "gearshape") }
+                engine.tabItem { Label("À propos", systemImage: "info.circle") }
                 folders.tabItem { Label("Dossiers", systemImage: "folder") }
                 server.tabItem { Label("Serveur", systemImage: "externaldrive.badge.wifi") }
                 AppleTVPreparationView().tabItem { Label("Apple TV", systemImage: "appletv") }
@@ -126,6 +129,26 @@ struct SettingsView: View {
                 Text("Les MKV originaux ne sont jamais supprimés. Le nettoyage reste désactivé par défaut.")
                     .font(.caption).foregroundStyle(.secondary)
             } header: { Label("Stockage", systemImage: "internaldrive") }
+        }.formStyle(.grouped)
+    }
+
+    private var engine: some View {
+        let diagnostic = EngineDiagnostic()
+        return Form {
+            Section {
+                Text(diagnostic.label).font(.headline)
+                Text(diagnostic.status).foregroundStyle(diagnostic.valid ? Color.secondary : Color.red)
+                Text(diagnostic.applicationPath).textSelection(.enabled)
+                Text("Aucun repli vers Subler installé si le moteur local est absent ou invalide.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Moteur sélectionné") }
+            Section {
+                Text(AppVersion.current.details)
+                Text("Commit : \(diagnostic.commit)")
+                Text("Application : \(diagnostic.bundleIdentifier)")
+                Text(diagnostic.executablePath)
+            } header: { Text("Build exécuté") }
+            .font(.caption).textSelection(.enabled)
         }.formStyle(.grouped)
     }
 

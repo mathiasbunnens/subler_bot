@@ -10,7 +10,14 @@ private enum InstanceLock {
         do { try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true) }
         catch { return } // Queue initialization will surface this failure without processing.
         descriptor = open(root.appendingPathComponent("instance.lock").path, O_CREAT | O_RDWR, 0o600)
-        guard descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) == 0 else { exit(0) }
+        guard descriptor >= 0, flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+            guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil else { exit(0) }
+            let alert = NSAlert()
+            alert.messageText = "Une autre instance de Subler Automation est ouverte"
+            alert.informativeText = "Quittez explicitement l’ancienne instance lorsqu’aucun traitement n’est en cours, puis ouvrez cette application. Aucun processus ni réglage n’a été modifié."
+            alert.runModal()
+            exit(0)
+        }
     }
 }
 
@@ -19,6 +26,15 @@ struct SublerAutomationApp: App {
     @StateObject private var queue: JobQueueService
     @NSApplicationDelegateAdaptor(AppPresentationDelegate.self) private var appDelegate
     init() {
+        // Selection only: before the lock, settings and queue; no Apple Events.
+        if CommandLine.arguments.contains("--diagnose-target") {
+            do {
+                let data = try JSONEncoder().encode(EngineDiagnostic())
+                FileHandle.standardOutput.write(data)
+                FileHandle.standardOutput.write(Data("\n".utf8))
+                exit(0)
+            } catch { exit(1) }
+        }
         InstanceLock.acquire()
         let queue = JobQueueService()
         _queue = StateObject(wrappedValue: queue)

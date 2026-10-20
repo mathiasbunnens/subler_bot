@@ -1,12 +1,31 @@
 import Foundation
 import AppKit
 
-/// Explicit process-level opt-in only. An invalid local target never falls back to
-/// the user's installed Subler or shares its preferences/queue.
+/// Signed bundle selection takes precedence; environment opt-in remains available
+/// for development. Invalid local configuration never falls back to installed Subler.
 public struct SublerTarget: Sendable {
     public static let environmentKey = "SUBLER_AUTOMATION_LOCAL_SUBLER_APP"
     public let backgroundApplication: String?
-    public init(backgroundApplication: String? = ProcessInfo.processInfo.environment[environmentKey]) {
+    public init() {
+        self.init(environment: ProcessInfo.processInfo.environment,
+                  bundleInfo: Bundle.main.infoDictionary, bundleURL: Bundle.main.bundleURL)
+    }
+    public init(environment: [String: String], bundleInfo: [String: Any]?, bundleURL: URL) {
+        if bundleInfo?["SublerAutomationEngine"] != nil || bundleInfo?["SublerAutomationBackgroundRelativePath"] != nil {
+            // A present but malformed/unknown configuration is deliberately invalid,
+            // not the absence of opt-in. Only the reviewed co-local sibling is allowed.
+            if bundleInfo?["SublerAutomationEngine"] as? String == "background",
+               bundleInfo?["SublerAutomationBackgroundRelativePath"] as? String == "../Subler Background.app" {
+                backgroundApplication = bundleURL.deletingLastPathComponent()
+                    .appendingPathComponent("Subler Background.app").standardizedFileURL.path
+            } else {
+                backgroundApplication = ""
+            }
+        } else {
+            backgroundApplication = environment[Self.environmentKey]
+        }
+    }
+    public init(backgroundApplication: String?) {
         self.backgroundApplication = backgroundApplication
     }
     public var isBackground: Bool { backgroundApplication != nil }

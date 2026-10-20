@@ -1,6 +1,6 @@
 # Local-only windowless Subler route
 
-Status: implemented and exercised locally; opt-in only, not installed or published. This supersedes the implementation limitations in `hevc-packaging-investigation.md`, not its historical diagnostic results. No existing user MP4 was replaced or whole film processed.
+Status: native route implemented and exercised locally; build 5 now selects it from signed bundle configuration on Finder/LaunchServices launch, without a shell variable. PRIVATE LOCAL ONLY, not installed or published. The new caller's end-to-end launch test is awaiting a macOS Automation consent (see below); it is not claimed complete. This supersedes the implementation limitations in `hevc-packaging-investigation.md`, not its historical diagnostic results. No existing user MP4 was replaced or whole film processed.
 
 ## Cause and correction
 
@@ -17,21 +17,32 @@ A second bug was reproduced deterministically: after the last item completed, a 
 - Bundle ID: `local.sublerautomation.Subler`; protocol marker: `SublerAutomationBackgroundProtocol = 2`. The Swift target rejects the old integer-token v1 build.
 - `LSBackgroundOnly`, prohibited activation policy; no document, queue or activity-window construction during the tested route. Automatic updater controller/feed disabled.
 - Preferences use the distinct bundle ID; queue/logs/presets/OCR files use `~/Library/Application Support/SublerAutomationLocal`, never the installed app's `Subler` directory.
-- The default Automation route remains `org.galad.Subler`. Set `SUBLER_AUTOMATION_LOCAL_SUBLER_APP` explicitly to the absolute local bundle path to opt in. Invalid configuration fails closed, never falls back to the installed app. A running different local build is rejected rather than silently reused or terminated.
+- Ordinary `dist` builds and unbundled CLI default to `org.galad.Subler`; the distinct local build selects the co-local background sibling through `SublerAutomationEngine=background` and `SublerAutomationBackgroundRelativePath=../Subler Background.app` in its signed Info.plist. This configuration wins over inherited environment variables. `SUBLER_AUTOMATION_LOCAL_SUBLER_APP` remains a development compatibility opt-in only when no bundle selection is present. Missing/malformed local config or missing/wrong sibling fails closed. A running different local build is rejected rather than silently reused or terminated.
 - Permission preparation targets the same selected bundle ID. macOS may require a separate Automation grant for this build/caller and may prompt again after signing/identity changes; no permission bypass or blanket no-prompts promise is made. No Accessibility grant is used by this route.
 - Production instance, watched folders, normal Subler app/queue and TV playback were not launched/restarted/mutated to enable this route. Existing ready/working-foreign-item, destination/no-overwrite and stable queue-item-ID checks remain in place.
 
 Current local bundles (both ad-hoc signed and strictly verified):
 
     /Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Background.app
-    /Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation.app
+    /Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation Local.app
 
-Explicit opt-in launch, only when the normal Automation instance is not running and after reviewing its configured watched folders:
+Finder launch, only after explicitly quitting the old Automation instance when idle and reviewing its configured watched folders:
 
-    SUBLER_AUTOMATION_LOCAL_SUBLER_APP="/absolute/path/dist-local/Subler Background.app" \
-      "/absolute/path/dist-local/Subler Automation.app/Contents/MacOS/SublerAutomation"
+    open "/absolute/path/dist-local/Subler Automation Local.app"
 
-This document does not enable that environment variable for the user's production process. Test the app only with an explicit isolated `SUBLER_AUTOMATION_TEST_ROOT`; a normal app launch can process watched user media. Do not open the background bundle in the GUI to select films; its public test commands are for owned documents only.
+Do not open the old `dist-local/Subler Automation.app` (build 4, same identity as the normal dist build). Build 5 is `Subler Automation Local`, ID `com.mathiasbunnens.SublerAutomation.Local`; Settings → À propos displays the actual build, commit, executable and selected engine/path/error. No background-engine `activate` call was added. Settings/queue remain in the existing `Subler Automation` support directory; the shared lock prevents concurrent processing and now explains an already-running instance instead of silently exiting. The local app omits Finder Services registration to avoid competing with the ordinary build; add films through the app UI.
+
+The old Automation PID 74216 and background PID 10111 were left running untouched. Their on-disk executable timestamps were 15:52:51 and 15:47:11 respectively on 19 October; timestamps alone do NOT establish which uncommitted source they contained. The regression was independently reproduced from bundle metadata and default-target code, not by dumping process environments.
+
+Read-only diagnostic (also safe while the old Automation is running):
+
+    "/absolute/path/dist-local/Subler Automation Local.app/Contents/MacOS/SublerAutomation" --diagnose-target
+
+This runs before settings/queue/lock initialization, requests no permissions, and sends no Apple Events. It reports only allowlisted nonsecret build/selection fields. CLI and actual LaunchServices diagnostics selected the reviewed sibling successfully. Missing sibling is an error, not a switch to installed Subler.
+
+The generated-only real release launch reached `importing`, then a new macOS consent was required. TCC logs identified caller `com.mathiasbunnens.SublerAutomation.Local` and target `local.sublerautomation.Subler`, then `Prompting for access ...`. No permission was clicked or bypassed. Only the owned scratch Automation PID was stopped at the test deadline. Human consent is needed before rerunning the packaged end-to-end test; the previous caller/Terminal grants do not authorize this new caller. Re-signing ad-hoc builds can require consent again. Do not claim this test passed based on the separate Terminal/native tests.
+
+Test the app only with an explicit isolated `SUBLER_AUTOMATION_TEST_ROOT`; a normal app launch can process watched user media. Do not open the background bundle in the GUI to select films; its public test commands are for owned documents only.
 
 ## Reconstruct and build
 
@@ -47,14 +58,26 @@ On a fresh checkout with no `vendor-local/Subler` directory:
 
     bash scripts/prepare-local-subler.sh
     LOCAL_SUBLER_BUILD_ROOT="/absolute/scratch/local-subler-derived" bash scripts/build-local-subler.sh
-    SUBLER_BUILD_SCRATCH="/absolute/scratch" \
-      SUBLER_BUILD_APP="/absolute/output/Subler Automation.app" bash build.sh
+    SUBLER_BUILD_LOCAL_ENGINE=1 SUBLER_BUILD_SCRATCH="/absolute/scratch" bash build.sh
 
 `prepare-local-subler.sh` refuses to reset/overwrite an existing source checkout. It clones the public sources, checks out exact revisions, initializes the pinned contribution libraries and applies the two patches. Requires network for a new checkout and Xcode/SPM dependencies. The build script requires an absolute derived-data path, builds arm64 Release, patches only its newly built bundle identity/background flags, and ad-hoc signs/verifies it. It never installs to `/Applications`. Copy a completed bundle to a distinct owned `dist-local` path before opting in; do not replace a running app. These are source-reproducible builds, not a claim of byte-identical Xcode output or Developer ID/notarized distribution.
 
 `python3 scripts/test-local-subler-patches.py` reconstructs every patched file offline from the pristine pinned Git objects and proves byte equality with the reviewed native checkout. Both Subler and Automation have been built and signature-verified repeatedly; native patches were replayed successfully (12 Subler files, 4 MP42Foundation files).
 
 ## Verification and limitations
+
+Build-5 regression verification: the previous bundle fails `test-bundle-engine.py` at the exact missing-Finder-selection assertion. New source executes 18 targeted Swift tests with zero failures (one online-metadata test deliberately skipped), including live generated conversion, stale UUID rejection, bundle precedence/default/invalid-config tests and visible local build provenance. After adding the orphan-config negative case, the 10 version/bundle tests pass again. `settings-ui-contract.py` passes five contracts; `version-contract.py` passes all three against the actual release (including unsigned-Mach-O parity). The paused app smoke passes watcher, persistence, deduplication, shared-lock, restart recovery and source preservation. The new engine tab compiles; its live interactive layout has not been independently verified.
+
+The 35 native generated-only checks were rerun successfully: MP4, MKV and rich inputs each decode 48 images and seek three images; fallback/chapter/subtitle/HDR identities and refusal tests remain green. External observations report zero background windows/frontmost samples and the installed Subler queue unchanged. Native token/patch reconstruction contracts pass. This does not turn the blocked new-caller packaged launch into a pass.
+
+Repeat the new-caller test only with a human available for macOS consent. First run the native generated fixture command below, then use its reported scratch directory for `--generated` and `--probe`:
+
+    python3 scripts/test-bundle-engine.py --app "$PWD/dist-local/Subler Automation Local.app"
+    swift scripts/local-subler-observe.swift python3 scripts/test-bundle-engine-launch.py \
+      --app "$PWD/dist-local/Subler Automation Local.app" \
+      --generated "/reported/native/evidence/generated.mkv" --probe "/reported/native/evidence/probe"
+
+The launch test invokes the unmodified release via LaunchServices; only the settings/queue root is overridden. It seeds a native `MovieJob` for a generated fixture with manual metadata, uses no SMB configuration, verifies AVFoundation images/seek and preserved source, and stops only its own scratch app PID. It never stops the old Automation or background engine. Test-root permission preflights are injected, but the real Apple Events still require macOS consent; no result is fabricated if that blocks. Keep `TMPDIR` at an owned absolute scratch path.
 
 `docs/local-subler-evidence.json` records the measured results without private media names.
 
