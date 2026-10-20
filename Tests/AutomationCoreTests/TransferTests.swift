@@ -463,8 +463,8 @@ final class TransferTests: XCTestCase {
         XCTAssertEqual(identity, try FileManager.default.attributesOfItem(atPath: second.path)[.systemFileNumber] as? NSNumber)
     }
 
-    func testRealSMBReplacementPreservesEntireOwnedFixture() async throws {
-        guard ProcessInfo.processInfo.environment["SUBLER_TEST_SMB"] == "1" else { throw XCTSkip("Opt-in SMB replacement") }
+    func testRealSMBReplacementRefusesWithoutAtomicExchange() async throws {
+        guard ProcessInfo.processInfo.environment["SUBLER_TEST_SMB"] == "1" else { throw XCTSkip("Opt-in SMB replacement refusal") }
         let (root, _, source) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
         let mount = try await SMBService().mountedShare(configuration: .init())
         let name = "Subler Automation QA " + UUID().uuidString
@@ -477,23 +477,21 @@ final class TransferTests: XCTestCase {
         print("REAL_SMB_REPLACEMENT_FIXTURE: \(directory.path)")
         let service = TransferService(), job = UUID()
         let expected = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
-        let result = try await service.copy(source: source, mount: mount, movieName: name, jobID: job, replaceExisting: true, expectedDigest: expected, verify: {}, progress: { _ in })
-        XCTAssertEqual(SHA256.hash(data: try Data(contentsOf: result)).map { String(format: "%02x", $0) }.joined(), expected)
+        do {
+            _ = try await service.copy(source: source, mount: mount, movieName: name, jobID: job, replaceExisting: true, expectedDigest: expected, verify: { XCTFail("Unsupported replacement entered transfer") }, progress: { _ in XCTFail("Unsupported replacement copied bytes") })
+            XCTFail("Unsafe SMB replacement accepted")
+        } catch TransferError.replacementUnavailable { }
         let backup = await service.preservedBackup(jobID: job)
-        let saved = try XCTUnwrap(backup)
-        XCTAssertEqual(try Data(contentsOf: saved.appendingPathComponent(name + ".mp4")), original)
-        XCTAssertEqual(try Data(contentsOf: saved.appendingPathComponent("fixture.srt")), sidecar)
+        XCTAssertNil(backup)
+        XCTAssertEqual(try Data(contentsOf: final), original)
+        XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("fixture.srt")), sidecar)
         // No recursive deletion; refuse cleanup if any foreign child appeared.
-        guard try FileManager.default.contentsOfDirectory(atPath: directory.path) == [name + ".mp4"],
-              Set(try FileManager.default.contentsOfDirectory(atPath: saved.path)) == Set([name + ".mp4", "fixture.srt"]) else { throw TransferError.unsafePath }
-        try FileManager.default.removeItem(at: result)
+        guard Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)) == Set([name + ".mp4", "fixture.srt"]) else { throw TransferError.unsafePath }
+        try FileManager.default.removeItem(at: final)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("fixture.srt"))
         try FileManager.default.removeItem(at: directory)
-        try FileManager.default.removeItem(at: saved.appendingPathComponent(name + ".mp4"))
-        try FileManager.default.removeItem(at: saved.appendingPathComponent("fixture.srt"))
-        try FileManager.default.removeItem(at: saved)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: saved.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-        print("REAL_SMB_REPLACEMENT_VERIFIED: directory backup preserved film + subtitle; owned fixtures cleaned")
+        print("REAL_SMB_REPLACEMENT_REFUSAL_VERIFIED: original film + subtitle untouched; owned fixtures cleaned")
     }
 
     func testRealSMBTransferIntoUniqueTestDirectory() async throws {

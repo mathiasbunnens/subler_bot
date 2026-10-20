@@ -338,10 +338,12 @@ struct MenuBarView: View {
                             .disabled(queue.activeID != nil)
                             .help("Connexion native macOS avec votre utilisateur et mot de passe ; reprenez la file si elle est en pause")
                     }
-                    Button("Réessayer", systemImage: "arrow.clockwise") { queue.retry(job.id) }
+                    if !job.conflict {
+                        Button("Réessayer", systemImage: "arrow.clockwise") { queue.retry(job.id) }
+                    }
                     if job.conflict {
                         Button("Ignorer") { queue.ignore(job.id) }
-                        Button("Remplacer…") { queue.confirmReplacement(job.id) }
+                        Button("Confirmer remplacement…") { queue.confirmReplacement(job.id) }
                     }
                     Spacer(minLength: 0)
                     Button { queue.removeIntervention(job.id) } label: {

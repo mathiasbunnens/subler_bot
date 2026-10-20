@@ -30,7 +30,7 @@ final class JobQueueService: ObservableObject {
     private var ticking = false
     private var serverRetryAfter = Date.distantPast
     private var authenticationGate = SMBAuthenticationGate()
-    private var replacements = Set<UUID>()
+    private var replacements: [UUID: DestinationSnapshot] = [:]
     private var fatalPersistenceError = false
 
     var currentJob: MovieJob? { jobs.first { $0.id == activeID } }
@@ -171,14 +171,23 @@ final class JobQueueService: ObservableObject {
                         throw error
                     }
                 }
-                guard !jobs.contains(where: { $0.fingerprint == fingerprint || ($0.sourcePath == url.path && $0.status != .completed) }) else { continue }
+                if let existing = QueueImportPolicy.blockingJob(path: url.path, fingerprint: fingerprint, jobs: jobs, explicit: explicit) {
+                    if explicit {
+                        if existing.id == activeID || ![.failed, .paused, .waitingForServer].contains(existing.status) {
+                            message = "\(existing.displayName) possède déjà une tâche en attente ou en cours. Consultez cette tâche dans la file ; aucun second traitement concurrent n’a été lancé."
+                        } else {
+                            message = "\(existing.displayName) est déjà dans À vérifier. Reprenez cette tâche, ou retirez-la de la liste puis ajoutez le MKV à nouveau. Les fichiers sont conservés."
+                        }
+                    }
+                    continue
+                }
                 let updated = jobs + [MovieJob(sourcePath: url.path, fingerprint: fingerprint)]
                 do { try store.save(updated, explicitlyAddedFingerprints: explicit ? [fingerprint] : []) }
                 catch {
                     fatalPersistenceError = true; settings.paused = true
                     throw error
                 }
-                jobs = updated
+                jobs = updated; message = nil
             } catch {
                 message = "Ajout impossible : \(error.localizedDescription)"
                 if fatalPersistenceError { return }
@@ -324,14 +333,13 @@ final class JobQueueService: ObservableObject {
                     let identityTitle = value.manualMetadata?.title ?? chosen?.title
                     let identityYear = value.manualMetadata?.year ?? chosen?.year
                     let share = SMBConfiguration.effective(job: value.smbConfiguration, current: runSettings.smb)
-                    if !replacements.contains(id), share.isConfigured, let identityTitle, let identityYear,
+                    if replacements[id] == nil, share.isConfigured, let identityTitle, let identityYear,
                        let mounted = try? await smb.mountedShare(configuration: share) {
                         let name = MovieNaming.name(title: identityTitle, year: identityYear)
-                        let published = LocalPathPolicy.publishedMovie(shareRoot: mounted.root, movieName: name)
-                        if FileManager.default.fileExists(atPath: published.path) {
+                        if let snapshot = try DestinationSnapshot.capture(mount: mounted, movieName: name) {
                             await subler.close(document: document)
                             openedDocument = nil
-                            try update(id) { $0.title = identityTitle; $0.year = identityYear; $0.candidateIndex = chosen?.index; $0.candidateRaw = chosen?.raw; $0.status = .paused; $0.conflict = true; $0.needsSelection = false; $0.error = "Déjà sur le serveur : \(published.path). Conversion et envoi évités. Ignorer pour le laisser, ou Remplacer… pour l’envoyer quand même (l’ancien est conservé en sauvegarde)." }
+                            try update(id) { $0.title = identityTitle; $0.year = identityYear; $0.candidateIndex = chosen?.index; $0.candidateRaw = chosen?.raw; $0.smbConfiguration = share; $0.status = .paused; $0.conflict = true; $0.destinationSnapshot = snapshot; $0.needsSelection = false; $0.error = snapshot.summary + "\nConversion et envoi évités. Confirmez le remplacement ou retirez la tâche pour conserver le film existant." }
                             notify(id, "\(name) est déjà sur le serveur : rien n’a été envoyé.")
                             return
                         }
@@ -404,6 +412,10 @@ final class JobQueueService: ObservableObject {
                 try update(id) { $0.status = .waitingForServer; $0.error = "Préparez l’accès au partage monté dans Réglages → Autorisations. Le MP4 reste dans le dossier temporaire." }
                 return
             }
+            if replacements[id] == nil, let snapshot = try DestinationSnapshot.capture(mount: mount, movieName: value.displayName) {
+                try update(id) { $0.status = .paused; $0.conflict = true; $0.destinationSnapshot = snapshot; $0.smbConfiguration = configuration; $0.error = snapshot.summary + "\nMP4 validé conservé localement. Confirmez le remplacement ou retirez la tâche." }
+                return
+            }
             _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
             try Task.checkCancellation()
             if value.posterPath.map({ !PosterExtractor.isOwned($0, workRoot: workRoot, jobID: id) }) ?? true {
@@ -414,8 +426,8 @@ final class JobQueueService: ObservableObject {
             }
             try update(id) { $0.status = .transferring; $0.error = nil }
             let server = smb
-            let replace = replacements.remove(id) != nil
-            let destination = try await transfer.copy(source: URL(fileURLWithPath: localPath), mount: mount, movieName: value.displayName, jobID: id, replaceExisting: replace, expectedDigest: digest, verify: {
+            let replacement = replacements.removeValue(forKey: id)
+            let destination = try await transfer.copy(source: URL(fileURLWithPath: localPath), mount: mount, movieName: value.displayName, jobID: id, replaceExisting: replacement != nil, replacement: replacement, expectedDigest: digest, verify: {
                 let current = try await server.mountedShare(configuration: configuration)
                 guard current.root == mount.root, current.origin == mount.origin else { throw UserFacingError("Montage SMB modifié pendant la copie.") }
             }, progress: { sample in
@@ -443,6 +455,8 @@ final class JobQueueService: ObservableObject {
             let text = error.localizedDescription + (backup.map { " Sauvegarde conservée : \($0.path)" } ?? "")
             var conflict = false
             if case TransferError.conflict = error { conflict = true }
+            if case TransferError.destinationChanged = error { conflict = true }
+            if case TransferError.replacementUnavailable = error { conflict = true }
             let value = try? job(id)
             if value?.status == .completed {
                 message = "Film transféré, nettoyage local impossible : \(text)"
@@ -451,7 +465,7 @@ final class JobQueueService: ObservableObject {
             let serverMissing = (try? await smb.mountedShare(configuration: SMBConfiguration.effective(job: value?.smbConfiguration, current: runSettings.smb))) == nil
             let waiting = value?.validated == true && serverMissing && !conflict && !(error is OutputSafetyError)
             if waiting { serverRetryAfter = Date().addingTimeInterval(60) }
-            try? update(id) { $0.status = waiting ? .waitingForServer : .failed; $0.error = text; $0.backupPath = backup?.path; $0.conflict = conflict }
+            try? update(id) { $0.status = conflict ? .paused : waiting ? .waitingForServer : .failed; $0.error = text; $0.backupPath = backup?.path; $0.conflict = conflict }
             notify(id, text)
         }
     }
@@ -484,12 +498,16 @@ final class JobQueueService: ObservableObject {
     }
     func retry(_ id: UUID) {
         guard activeID != id, requireSourceForConversion(id) else { return }
+        guard (try? job(id).conflict) != true else {
+            message = "Ce film existe déjà sur serveur. Utilisez Confirmer remplacement… ou retirez la tâche ; Réessayer ne vaut pas consentement."
+            return
+        }
         serverRetryAfter = .distantPast
         try? update(id) { $0.status = $0.validated ? .waitingForServer : .pending; $0.error = nil; $0.conflict = false; $0.needsSelection = false }
         Task { await tick() }
     }
     func removeIntervention(_ id: UUID) {
-        guard !fatalPersistenceError, let store else {
+        guard !fatalPersistenceError, store != nil else {
             message = "Suppression de la liste impossible : persistance indisponible."; return
         }
         do { _ = try InterventionRemovalPolicy.validate(id, jobs: jobs, activeID: activeID) }
@@ -509,10 +527,15 @@ final class JobQueueService: ObservableObject {
         }
         do { _ = try InterventionRemovalPolicy.validate(id, jobs: jobs, activeID: activeID) }
         catch { message = error.localizedDescription; return }
+        removeConfirmedIntervention(id)
+    }
+    /// Shared by the modal action and the isolated queue harness; never deletes media.
+    func removeConfirmedIntervention(_ id: UUID) {
+        guard !fatalPersistenceError, let store, let value = try? job(id) else { return }
         do {
             let remaining = try store.removeIntervention(id, jobs: jobs, activeID: activeID)
             jobs = remaining
-            candidates.removeValue(forKey: id); replacements.remove(id)
+            candidates.removeValue(forKey: id); replacements.removeValue(forKey: id)
             stability.reset(path: value.sourcePath)
             message = nil
             store.log("\(id): tâche retirée de la liste ; fichiers et file Subler conservés.")
@@ -524,7 +547,8 @@ final class JobQueueService: ObservableObject {
     }
     func ignore(_ id: UUID) {
         guard activeID != id else { return }
-        try? update(id) { $0.status = .paused; $0.error = "Ignoré. MKV et MP4 locaux conservés."; $0.conflict = false; $0.needsSelection = false }
+        replacements.removeValue(forKey: id)
+        try? update(id) { $0.status = .paused; $0.error = "Ignoré. MKV et MP4 locaux conservés."; $0.needsSelection = false }
     }
     func togglePause() {
         // New jobs recheck this flag after readiness awaits.
@@ -534,15 +558,45 @@ final class JobQueueService: ObservableObject {
     }
     func confirmReplacement(_ id: UUID) {
         guard activeID != id, let value = try? job(id), value.conflict else { return }
-        let alert = NSAlert()
-        alert.messageText = "Remplacer \(value.displayName) sur le serveur ?"
-        alert.informativeText = "Sur SMB, le dossier existant entier (MP4, sous-titres et autres fichiers) sera conservé dans un dossier .backup. Aucun original ne sera supprimé. Le nouveau dossier ne sera publié qu’après vérification complète."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Annuler")
-        alert.addButton(withTitle: "Remplacer et conserver une sauvegarde")
-        Self.activateForModal()
-        guard alert.runModal() == .alertSecondButtonReturn else { return }
-        replacements.insert(id); retry(id)
+        Task { await reviewReplacement(id, expected: value.destinationSnapshot) }
+    }
+    /// Returns nil after refreshing a changed/legacy target: a second action is required.
+    func replacementReviewSnapshot(_ id: UUID, mount: VerifiedMount, expected: DestinationSnapshot?) throws -> DestinationSnapshot? {
+        guard activeID != id, let value = try? job(id), value.conflict else { return nil }
+        guard let current = try DestinationSnapshot.capture(mount: mount, movieName: value.displayName) else { throw TransferError.destinationChanged }
+        guard current == expected else {
+            try update(id) { $0.destinationSnapshot = current; $0.error = current.summary + "\nLa cible a changé depuis sa détection. Vérifiez cette version, puis confirmez à nouveau." }
+            return nil
+        }
+        return current
+    }
+    func acceptReplacement(_ id: UUID, mount: VerifiedMount, reviewed: DestinationSnapshot, confirmed: Bool) throws {
+        guard confirmed, activeID != id, let latest = try? job(id), latest.conflict, latest.destinationSnapshot == reviewed else { return }
+        try reviewed.requireUnchanged(mount: mount, movieName: latest.displayName)
+        try mount.requireReplacementSupport()
+        replacements[id] = reviewed
+        try update(id) { $0.conflict = false; $0.status = $0.validated ? .waitingForServer : .pending; $0.error = nil }
+        Task { await tick() }
+    }
+    private func reviewReplacement(_ id: UUID, expected: DestinationSnapshot?) async {
+        do {
+            let value = try job(id)
+            let configuration = SMBConfiguration.effective(job: value.smbConfiguration, current: settings.smb)
+            let mount = try await smb.mountedShare(configuration: configuration)
+            guard let current = try replacementReviewSnapshot(id, mount: mount, expected: expected) else { return }
+            let alert = NSAlert()
+            alert.messageText = "Remplacer \(value.displayName) sur le serveur ?"
+            alert.informativeText = current.summary + "\n\nLe remplacement n’est autorisé que si la cible est inchangée et un échange atomique sûr est disponible. Sinon il sera bloqué, sans déplacer l’original ni lancer une conversion inutile."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Annuler")
+            alert.addButton(withTitle: "Confirmer le remplacement")
+            Self.activateForModal()
+            try acceptReplacement(id, mount: mount, reviewed: current, confirmed: alert.runModal() == .alertSecondButtonReturn)
+        } catch {
+            replacements.removeValue(forKey: id)
+            guard (try? job(id)) != nil else { return }
+            try? update(id) { $0.status = .paused; $0.conflict = true; $0.error = ($0.destinationSnapshot?.summary ?? "Existe déjà sur serveur") + "\n" + error.localizedDescription }
+        }
     }
     /// Only this explicit action resets the persistent count; job history is untouched.
     func resetBatchCounter() { persistCompletionCounter(reset: true) }

@@ -8,8 +8,12 @@ import plistlib
 import shutil
 import subprocess
 import tempfile
+import sys
 
 project = Path(__file__).resolve().parent.parent
+review = '--reimport-review' in sys.argv[1:]
+entry = 'reimport-review-queue-smoke.swift' if review else 'manual-metadata-queue-smoke.swift'
+marker = 'REIMPORT_REVIEW_QUEUE_PASS:' if review else 'MANUAL_METADATA_QUEUE_PASS:'
 scratch = Path.home() / '.hermes/cache/scratch'
 scratch.mkdir(parents=True, exist_ok=True)
 root = Path(tempfile.mkdtemp(prefix='manual-metadata-queue-', dir=scratch))
@@ -20,10 +24,10 @@ def run(args):
     if result.returncode:
         raise RuntimeError(result.stdout + result.stderr)
     return result.stdout
-run(['swiftc', '-emit-library', '-emit-module', '-module-name', 'AutomationCore',
+run(['swiftc', '-enable-testing', '-emit-library', '-emit-module', '-module-name', 'AutomationCore',
      *map(str, (project / 'Sources/AutomationCore').glob('*.swift')),
      '-emit-module-path', str(root / 'AutomationCore.swiftmodule'), '-o', str(root / 'libAutomationCore.dylib')])
-files = [project / 'scripts/manual-metadata-queue-smoke.swift', project / 'scripts/harness-check.swift']
+files = [project / 'scripts' / entry, project / 'scripts/harness-check.swift']
 for folder in ['Views', 'Models', 'Services']:
     files.extend((project / 'Sources/SublerAutomation' / folder).glob('*.swift'))
 run(['swiftc', '-parse-as-library', '-I', str(root), '-L', str(root), '-lAutomationCore',
@@ -43,5 +47,5 @@ run(['open', '-g', '-n', '-W', '--stdout', str(output), '--stderr', str(error),
 stdout = output.read_text() if output.exists() else ''
 stderr = error.read_text() if error.exists() else ''
 print(stdout, flush=True)
-if 'MANUAL_METADATA_QUEUE_PASS:' not in stdout or 'Precondition failed' in stderr:
+if marker not in stdout or 'Precondition failed' in stderr:
     raise RuntimeError(f'Queue smoke failed; evidence: {root}\n{stderr}')

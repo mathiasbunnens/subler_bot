@@ -11,7 +11,7 @@ public struct TransferProgress: Sendable {
     public var secondsRemaining: Double? { bytesPerSecond > 0 ? Double(max(0, totalBytes - (verificationBytes ?? bytesCopied))) / bytesPerSecond : nil }
 }
 public enum TransferError: LocalizedError {
-    case conflict(URL), unsafePath, integrity, io(Int32), busy
+    case conflict(URL), unsafePath, integrity, io(Int32), busy, destinationChanged, replacementUnavailable
     public var errorDescription: String? {
         switch self {
         case .conflict(let url): return "Destination already exists: \(url.path)"
@@ -19,6 +19,8 @@ public enum TransferError: LocalizedError {
         case .integrity: return "Source/remote size or SHA-256 verification failed."
         case .io(let code): return "Transfer I/O failed (\(code)): \(String(cString: strerror(code)))"
         case .busy: return "A transfer to this destination is already running."
+        case .destinationChanged: return "La version sur le serveur a changé. Vérifiez la nouvelle cible puis confirmez à nouveau le remplacement. Aucun original n’a été déplacé."
+        case .replacementUnavailable: return "Remplacement SMB bloqué : ce moteur ne garantit pas un échange atomique conditionnel de la cible confirmée. Aucun original n’a été déplacé ; les fichiers restent conservés."
         }
     }
 }
@@ -78,12 +80,17 @@ public actor TransferService {
         return false
     }
 
-    public func copy(source: URL, mount: VerifiedMount, movieName: String, jobID: UUID, replaceExisting: Bool = false, expectedDigest: String? = nil, verify: @escaping @Sendable () async throws -> Void, progress: @escaping @Sendable (TransferProgress) async -> Void) async throws -> URL {
+    public func copy(source: URL, mount: VerifiedMount, movieName: String, jobID: UUID, replaceExisting: Bool = false, replacement: DestinationSnapshot? = nil, expectedDigest: String? = nil, verify: @escaping @Sendable () async throws -> Void, progress: @escaping @Sendable (TransferProgress) async -> Void) async throws -> URL {
         // Darwin smbfs normalizes names to NFD. Use that exact byte spelling for
         // every POSIX operation so synthesized path-based inodes stay consistent.
         let movieName = movieName.decomposedStringWithCanonicalMapping
         var info = statfs()
         let isSMB = statfs(mount.root.path, &info) == 0 && mountString(info.f_fstypename) == "smbfs"
+        if let replacement { try replacement.requireUnchanged(mount: mount, movieName: movieName) }
+        // The former two-renames backup/publication leaves the public target absent
+        // on disconnect and cannot conditionally exchange the consented SMB entry.
+        // Never attempt that destructive fallback on a real server.
+        if replaceExisting { try mount.requireReplacementSupport() }
         if forceDirectoryPublication || isSMB {
             return try await copyDirectory(source: source, mount: mount, movieName: movieName, jobID: jobID, replaceExisting: replaceExisting, expectedDigest: expectedDigest, verify: verify, progress: progress)
         }

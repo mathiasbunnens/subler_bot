@@ -31,6 +31,7 @@ public struct MovieJob: Codable, Identifiable, Sendable {
     public var error: String?
     public var needsSelection = false
     public var conflict = false
+    public var destinationSnapshot: DestinationSnapshot?
     public init(sourcePath: String, fingerprint: String, id: UUID = UUID()) {
         self.id = id; self.sourcePath = sourcePath; self.fingerprint = fingerprint
     }
@@ -39,7 +40,7 @@ public struct MovieJob: Codable, Identifiable, Sendable {
         return URL(fileURLWithPath: sourcePath).deletingPathExtension().lastPathComponent
     }
     public var canEditMetadata: Bool {
-        !validated && localPath == nil && (needsSelection || [.failed, .paused].contains(status))
+        !conflict && !validated && localPath == nil && (needsSelection || [.failed, .paused].contains(status))
     }
     public mutating func applyManualMetadata(_ metadata: ManualMovieMetadata, isActive: Bool) throws {
         guard !isActive, canEditMetadata else {

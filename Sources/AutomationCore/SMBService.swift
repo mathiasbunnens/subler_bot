@@ -82,11 +82,21 @@ public struct VerifiedMount: Sendable {
     public let origin: String
     // No public initializer or production fallback to a local directory.
     private let isFixture: Bool
-    fileprivate init(root: URL, origin: String, isFixture: Bool = false) {
+    private let fixtureReplacementAllowed: Bool
+    fileprivate init(root: URL, origin: String, isFixture: Bool = false, fixtureReplacementAllowed: Bool = false) {
         self.root = root; self.origin = origin; self.isFixture = isFixture
+        self.fixtureReplacementAllowed = fixtureReplacementAllowed
     }
     // Explicit internal-only test seam; normal clients cannot construct this.
-    static func fixture(root: URL) -> VerifiedMount { .init(root: root, origin: "test-fixture", isFixture: true) }
+    static func fixture(root: URL, allowsReplacement: Bool = true) -> VerifiedMount {
+        .init(root: root, origin: "test-fixture", isFixture: true, fixtureReplacementAllowed: allowsReplacement)
+    }
+
+    /// No production SMB backend currently provides conditional atomic exchange.
+    /// Keep legacy backup/rollback algorithms available only to local fixtures.
+    public func requireReplacementSupport() throws {
+        guard isFixture && fixtureReplacementAllowed else { throw TransferError.replacementUnavailable }
+    }
 
     func revalidate(descriptor: Int32) throws {
         var descriptorInfo = stat(), pathInfo = stat()
