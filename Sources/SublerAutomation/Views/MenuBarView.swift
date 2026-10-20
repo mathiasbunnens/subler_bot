@@ -326,6 +326,10 @@ struct MenuBarView: View {
                     Text(error).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if job.conflict {
+                    Text(queue.replacementSourceDetails(job)).font(.caption).foregroundStyle(.secondary)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
                 if job.needsSelection, let choices = queue.candidates[job.id], !choices.isEmpty {
                     candidateRows(choices, for: job)
                 }

@@ -11,7 +11,7 @@ public struct TransferProgress: Sendable {
     public var secondsRemaining: Double? { bytesPerSecond > 0 ? Double(max(0, totalBytes - (verificationBytes ?? bytesCopied))) / bytesPerSecond : nil }
 }
 public enum TransferError: LocalizedError {
-    case conflict(URL), unsafePath, integrity, io(Int32), busy, destinationChanged, replacementUnavailable
+    case conflict(URL), unsafePath, integrity, io(Int32), busy, destinationChanged, recoveryRequired(URL)
     public var errorDescription: String? {
         switch self {
         case .conflict(let url): return "Destination already exists: \(url.path)"
@@ -19,27 +19,43 @@ public enum TransferError: LocalizedError {
         case .integrity: return "Source/remote size or SHA-256 verification failed."
         case .io(let code): return "Transfer I/O failed (\(code)): \(String(cString: strerror(code)))"
         case .busy: return "A transfer to this destination is already running."
-        case .destinationChanged: return "La version sur le serveur a changé. Vérifiez la nouvelle cible puis confirmez à nouveau le remplacement. Aucun original n’a été déplacé."
-        case .replacementUnavailable: return "Remplacement SMB bloqué : ce moteur ne garantit pas un échange atomique conditionnel de la cible confirmée. Aucun original n’a été déplacé ; les fichiers restent conservés."
+        case .recoveryRequired(let url): return "Transaction interrompue : fichiers conservés dans \(url.path). Vérification et récupération manuelles requises avant un nouvel envoi."
+        case .destinationChanged: return "La version sur le serveur a changé. Vérifiez la nouvelle cible puis confirmez à nouveau le remplacement. Les fichiers de transaction et sauvegardes éventuelles sont conservés."
+
         }
     }
 }
 
+enum ReplacementStep: Sendable { case copyChunk, synchronize, backupChunk }
+
 public actor TransferService {
-    private var active = Set<String>()
+    var active = Set<String>()
     private let forceDirectoryPublication: Bool
+    private var replacementFault: @Sendable (ReplacementStep) throws -> Void = { _ in }
+    private var nativeReplacement: @Sendable (URL, URL, String) throws -> Void = { final, stage, backup in
+        _ = try FileManager.default.replaceItemAt(final, withItemAt: stage, backupItemName: backup,
+            options: [.usingNewMetadataOnly, .withoutDeletingBackupItem])
+    }
     public init() { forceDirectoryPublication = false }
     // Internal fixture seam exercises SMB publication on a local filesystem.
     init(directoryPublication: Bool) { forceDirectoryPublication = directoryPublication }
-    private var backups: [UUID: URL] = [:]
+    init(nativeReplacement: @escaping @Sendable (URL, URL, String) throws -> Void) {
+        forceDirectoryPublication = false
+        self.nativeReplacement = nativeReplacement
+    }
+    init(replacementFault: @escaping @Sendable (ReplacementStep) throws -> Void) {
+        forceDirectoryPublication = false
+        self.replacementFault = replacementFault
+    }
+    var backups: [UUID: URL] = [:]
     public func preservedBackup(jobID: UUID) -> URL? { backups[jobID] }
 
-    private func stable(_ a: stat, _ b: stat) -> Bool {
+    func stable(_ a: stat, _ b: stat) -> Bool {
         a.st_dev == b.st_dev && a.st_ino == b.st_ino && a.st_size == b.st_size &&
         a.st_mtimespec.tv_sec == b.st_mtimespec.tv_sec && a.st_mtimespec.tv_nsec == b.st_mtimespec.tv_nsec &&
         a.st_ctimespec.tv_sec == b.st_ctimespec.tv_sec && a.st_ctimespec.tv_nsec == b.st_ctimespec.tv_nsec
     }
-    private func digest(_ file: FileHandle, mount: VerifiedMount, rootFD: Int32, directoryFD: Int32, movieName directoryName: String, verify: @escaping @Sendable () async throws -> Void, progress: (@Sendable (TransferProgress) async -> Void)? = nil) async throws -> SHA256.Digest {
+    func digest(_ file: FileHandle, mount: VerifiedMount, rootFD: Int32, directoryFD: Int32, movieName directoryName: String, verify: @escaping @Sendable () async throws -> Void, progress: (@Sendable (TransferProgress) async -> Void)? = nil) async throws -> SHA256.Digest {
         let before = try attributes(file.fileDescriptor)
         try file.seek(toOffset: 0)
         var hash = SHA256(), count: Int64 = 0
@@ -57,12 +73,12 @@ public actor TransferService {
         return hash.finalize()
     }
 
-    private func attributes(_ descriptor: Int32) throws -> stat {
+    func attributes(_ descriptor: Int32) throws -> stat {
         var info = stat()
         guard fstat(descriptor, &info) == 0 else { throw TransferError.io(errno) }
         return info
     }
-    private func checkEntry(parent: Int32, name: String, descriptor: Int32) throws {
+    func checkEntry(parent: Int32, name: String, descriptor: Int32) throws {
         var entry = stat()
         let descriptorInfo = try attributes(descriptor)
         guard fstatat(parent, name, &entry, AT_SYMLINK_NOFOLLOW) == 0,
@@ -87,14 +103,166 @@ public actor TransferService {
         var info = statfs()
         let isSMB = statfs(mount.root.path, &info) == 0 && mountString(info.f_fstypename) == "smbfs"
         if let replacement { try replacement.requireUnchanged(mount: mount, movieName: movieName) }
-        // The former two-renames backup/publication leaves the public target absent
-        // on disconnect and cannot conditionally exchange the consented SMB entry.
-        // Never attempt that destructive fallback on a real server.
-        if replaceExisting { try mount.requireReplacementSupport() }
+        if replaceExisting, let replacement {
+            return try await replaceFile(source: source, mount: mount, movieName: movieName, jobID: jobID,
+                replacement: replacement, expectedDigest: expectedDigest, verify: verify, progress: progress)
+        }
+        if replaceExisting { throw TransferError.destinationChanged }
         if forceDirectoryPublication || isSMB {
             return try await copyDirectory(source: source, mount: mount, movieName: movieName, jobID: jobID, replaceExisting: replaceExisting, expectedDigest: expectedDigest, verify: verify, progress: progress)
         }
         return try await copyFile(source: source, mount: mount, movieName: movieName, jobID: jobID, replaceExisting: replaceExisting, expectedDigest: expectedDigest, verify: verify, progress: progress).url
+    }
+
+    private func replaceFile(source: URL, mount: VerifiedMount, movieName: String, jobID: UUID,
+                             replacement: DestinationSnapshot, expectedDigest: String?,
+                             verify: @escaping @Sendable () async throws -> Void,
+                             progress: @escaping @Sendable (TransferProgress) async -> Void) async throws -> URL {
+        guard let expectedDigest, expectedDigest.count == 64 else { throw TransferError.integrity }
+        let key = mount.root.path + "/" + movieName
+        guard active.insert(key).inserted else { throw TransferError.busy }
+        defer { active.remove(key) }
+        let root = open(mount.root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard root >= 0 else { throw TransferError.unsafePath }
+        defer { close(root) }
+        try mount.revalidate(descriptor: root)
+        let directory = openat(root, movieName, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
+        guard directory >= 0 else { throw TransferError.unsafePath }
+        defer { close(directory) }
+        try checkEntry(parent: root, name: movieName, descriptor: directory)
+        let finalName = movieName + ".mp4"
+        let folder = mount.root.appendingPathComponent(movieName)
+        let final = folder.appendingPathComponent(finalName)
+        let oldFD = try ReplacementTransaction.openRegular(parent: directory, name: finalName)
+        defer { close(oldFD) }
+        let old = FileHandle(fileDescriptor: oldFD, closeOnDealloc: false)
+        let oldInfo = try attributes(oldFD)
+        let oldHash = try await digest(old, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify)
+        let oldDigest = oldHash.map { String(format: "%02x", $0) }.joined()
+        try replacement.requireUnchanged(mount: mount, movieName: movieName)
+        let inputFD = open(source.path, O_RDONLY | O_NOFOLLOW | O_CLOEXEC)
+        guard inputFD >= 0 else { throw TransferError.unsafePath }
+        let input = FileHandle(fileDescriptor: inputFD, closeOnDealloc: true)
+        defer { try? input.close() }
+        let sourceInfo = try attributes(inputFD)
+        guard sourceInfo.st_mode & S_IFMT == S_IFREG,
+              !(sourceInfo.st_dev == oldInfo.st_dev && sourceInfo.st_ino == oldInfo.st_ino) else { throw TransferError.unsafePath }
+        let prefix = ".subler-replace-" + jobID.uuidString + "-" + UUID().uuidString
+        let transaction = ReplacementTransaction(jobID: jobID, destination: replacement, sourcePath: source.path,
+            digest: expectedDigest, oldDigest: oldDigest, stageName: prefix + ".new", backupName: prefix + ".backup", journalName: prefix + ".json")
+        let journalFD = openat(directory, transaction.journalName, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard journalFD >= 0 else { throw TransferError.io(errno) }
+        let journal = FileHandle(fileDescriptor: journalFD, closeOnDealloc: true)
+        defer { try? journal.close() }
+        try journal.write(contentsOf: JSONEncoder().encode(transaction)); try journal.synchronize()
+        let stageFD = openat(directory, transaction.stageName, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard stageFD >= 0 else { throw TransferError.io(errno) }
+        let output = FileHandle(fileDescriptor: stageFD, closeOnDealloc: true)
+        defer { try? output.close() }
+        let start = ContinuousClock.now
+        var copied: Int64 = 0, hash = SHA256()
+        func check() async throws {
+            try Task.checkCancellation(); try await verify(); try mount.revalidate(descriptor: root)
+            try checkEntry(parent: root, name: movieName, descriptor: directory)
+            try checkEntry(parent: directory, name: transaction.stageName, descriptor: stageFD)
+            try checkEntry(parent: directory, name: finalName, descriptor: oldFD)
+            guard stable(oldInfo, try attributes(oldFD)), stable(sourceInfo, try attributes(inputFD)) else { throw TransferError.destinationChanged }
+        }
+        await progress(.init(bytesCopied: 0, totalBytes: sourceInfo.st_size, bytesPerSecond: 0))
+        while let data = try input.read(upToCount: 1_048_576), !data.isEmpty {
+            try await check()
+            try replacementFault(.copyChunk)
+            try output.write(contentsOf: data); hash.update(data: data); copied += Int64(data.count)
+            let duration = start.duration(to: .now).components
+            let elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+            await progress(.init(bytesCopied: copied, totalBytes: sourceInfo.st_size, bytesPerSecond: Double(copied) / max(elapsed, 0.001)))
+        }
+        try replacementFault(.synchronize)
+        try output.synchronize()
+        let staged = try attributes(stageFD)
+        guard copied == sourceInfo.st_size, hash.finalize().map({ String(format: "%02x", $0) }).joined() == expectedDigest else { throw TransferError.integrity }
+        let readback = try await digest(output, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify, progress: progress)
+        guard readback.map({ String(format: "%02x", $0) }).joined() == expectedDigest,
+              stable(staged, try attributes(stageFD)) else { throw TransferError.integrity }
+        try await check()
+        // Preserve a synchronized, independently verified copy BEFORE handing
+        // publication to Foundation. Even a multi-step filesystem implementation
+        // or failed native rollback cannot consume the only old version.
+        let savedFD = openat(directory, transaction.backupName, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard savedFD >= 0 else { throw TransferError.io(errno) }
+        let saved = FileHandle(fileDescriptor: savedFD, closeOnDealloc: true)
+        defer { try? saved.close() }
+        try old.seek(toOffset: 0)
+        while let bytes = try old.read(upToCount: 1_048_576), !bytes.isEmpty {
+            try await check()
+            try checkEntry(parent: directory, name: transaction.backupName, descriptor: savedFD)
+            try replacementFault(.backupChunk)
+            try saved.write(contentsOf: bytes)
+        }
+        try saved.synchronize()
+        let savedHash = try await digest(saved, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify)
+        guard savedHash.map({ String(format: "%02x", $0) }).joined() == oldDigest else { throw TransferError.integrity }
+        backups[jobID] = folder.appendingPathComponent(transaction.backupName)
+        try await check()
+        _ = fsync(directory)
+        // Coordinate with local document presenters. This does not lock out an
+        // uncoordinated NAS writer; there is no portable SMB compare-and-swap.
+        // Recheck inside the synchronous accessor, without an intervening await.
+        var coordinationError: NSError?, operationError: Error?
+        NSFileCoordinator().coordinate(writingItemAt: final, options: .forReplacing, error: &coordinationError) { coordinated in
+            do {
+                try Task.checkCancellation()
+                try mount.revalidate(descriptor: root)
+                try checkEntry(parent: root, name: movieName, descriptor: directory)
+                try checkEntry(parent: directory, name: transaction.stageName, descriptor: stageFD)
+                try replacement.requireUnchanged(mount: mount, movieName: movieName)
+                guard coordinated == final, stable(staged, try attributes(stageFD)), stable(sourceInfo, try attributes(inputFD)) else { throw TransferError.integrity }
+                var entry = stat()
+                try checkEntry(parent: directory, name: transaction.backupName, descriptor: savedFD)
+                guard fstatat(directory, transaction.backupName + ".native", &entry, AT_SYMLINK_NOFOLLOW) != 0, errno == ENOENT else { throw TransferError.unsafePath }
+                // Foundation owns the filesystem-specific exchange/backup steps.
+                // Never emulate it with remove(destination) + move(stage).
+                try nativeReplacement(final, folder.appendingPathComponent(transaction.stageName), transaction.backupName + ".native")
+            } catch { operationError = error }
+        }
+        let backup = folder.appendingPathComponent(transaction.backupName)
+        // The native API may have committed despite returning an error/disconnect.
+        // Retain intent, source, partial and backup in every ambiguous outcome.
+        if (try? ReplacementTransaction.openRegular(parent: directory, name: transaction.backupName)).map({ close($0); return true }) == true {
+            backups[jobID] = backup
+        }
+        if let operationError { throw operationError }
+        if let coordinationError { throw coordinationError }
+        try mount.revalidate(descriptor: root)
+        try checkEntry(parent: root, name: movieName, descriptor: directory)
+        // A non-cooperating writer can race the final native operation on SMB.
+        // Detect an exchanged third-party version; retain BOTH backups, never
+        // automatically restore over another writer or declare success.
+        let exchangedFD = try ReplacementTransaction.openRegular(parent: directory, name: transaction.backupName + ".native")
+        defer { close(exchangedFD) }
+        let exchanged = FileHandle(fileDescriptor: exchangedFD, closeOnDealloc: false)
+        let exchangedHash = try await digest(exchanged, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify)
+        guard exchangedHash.map({ String(format: "%02x", $0) }).joined() == oldDigest else { throw TransferError.destinationChanged }
+        try checkEntry(parent: directory, name: transaction.backupName + ".native", descriptor: exchangedFD)
+        let backupFD = try ReplacementTransaction.openRegular(parent: directory, name: transaction.backupName)
+        defer { close(backupFD) }
+        let preserved = FileHandle(fileDescriptor: backupFD, closeOnDealloc: false)
+        let preservedHash = try await digest(preserved, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify)
+        guard preservedHash.map({ String(format: "%02x", $0) }).joined() == oldDigest else { throw TransferError.destinationChanged }
+        try checkEntry(parent: directory, name: transaction.backupName, descriptor: backupFD)
+        let preservedInfo = try attributes(backupFD), exchangedInfo = try attributes(exchangedFD)
+        let publishedFD = try ReplacementTransaction.openRegular(parent: directory, name: finalName)
+        defer { close(publishedFD) }
+        let published = FileHandle(fileDescriptor: publishedFD, closeOnDealloc: false)
+        let finalHash = try await digest(published, mount: mount, rootFD: root, directoryFD: directory, movieName: movieName, verify: verify, progress: progress)
+        guard finalHash.map({ String(format: "%02x", $0) }).joined() == expectedDigest else { throw TransferError.integrity }
+        try checkEntry(parent: directory, name: finalName, descriptor: publishedFD)
+        try checkEntry(parent: directory, name: transaction.backupName, descriptor: backupFD)
+        try checkEntry(parent: directory, name: transaction.backupName + ".native", descriptor: exchangedFD)
+        guard stable(preservedInfo, try attributes(backupFD)), stable(exchangedInfo, try attributes(exchangedFD)) else { throw TransferError.integrity }
+        try mount.revalidate(descriptor: root)
+        _ = fsync(directory)
+        return final
     }
 
     /// SMB commonly rejects RENAME_EXCL for files (ENOTSUP). Publish a whole

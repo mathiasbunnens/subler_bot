@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import CryptoKit
 @testable import AutomationCore
 
 @main struct ReimportReviewQueueSmoke {
@@ -57,7 +58,7 @@ import SwiftUI
             try! FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let final = directory.appendingPathComponent("Film (2024).mp4")
             try! Data("existing server fixture".utf8).write(to: final)
-            let mount = VerifiedMount.fixture(root: share, allowsReplacement: false)
+            let mount = VerifiedMount.fixture(root: share)
             let snapshot = try! DestinationSnapshot.capture(mount: mount, movieName: "Film (2024)")!
             queue.jobs[1].title = "Film"; queue.jobs[1].year = 2024
             queue.jobs[1].candidateIndex = 2; queue.jobs[1].candidateRaw = "Film|2024"
@@ -72,10 +73,6 @@ import SwiftUI
             let before = try! Data(contentsOf: root.appendingPathComponent("jobs.json"))
             try! queue.acceptReplacement(addedID, mount: mount, reviewed: snapshot, confirmed: false)
             precondition((try! Data(contentsOf: root.appendingPathComponent("jobs.json"))) == before, "cancel must not authorize or mutate")
-            do {
-                try queue.acceptReplacement(addedID, mount: mount, reviewed: snapshot, confirmed: true)
-                preconditionFailure("Unsupported server must not start conversion")
-            } catch TransferError.replacementUnavailable {} catch { preconditionFailure("Unexpected: \(error)") }
             precondition(queue.jobs[1].localPath == nil && queue.jobs[1].candidateIndex == 2)
             try! Data("changed server fixture".utf8).write(to: final, options: .atomic)
             precondition(try! queue.replacementReviewSnapshot(addedID, mount: mount, expected: snapshot) == nil)
@@ -106,13 +103,56 @@ import SwiftUI
                 print("REVIEW_UI_IMAGE: \(path.path)")
                 window.orderOut(nil)
             }
+            // Feed the actual validated-output executor used by runJob. No native
+            // conversion is claimed: this is a digest-bound synthetic output.
+            let folder = URL(fileURLWithPath: settings.temporaryPath).appendingPathComponent(addedID.uuidString)
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let output = folder.appendingPathComponent(UUID().uuidString + ".mp4")
+            let bytes = Data(repeating: 0xBA, count: 1_100_000)
+            try! bytes.write(to: output)
+            queue.jobs[1].localPath = output.path; queue.jobs[1].workRoot = settings.temporaryPath
+            queue.jobs[1].validated = true
+            queue.jobs[1].validatedDigest = SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined()
+            let current = queue.jobs[1].destinationSnapshot!
+            do {
+                _ = try await queue.publishValidatedOutput(addedID, mount: mount, verify: {}, progress: { _ in })
+                preconditionFailure("Cancellation/no consent must not publish")
+            } catch TransferError.conflict {} catch { preconditionFailure("Unexpected refusal: \(error)") }
+            // Same target but changed source: the old job identity cannot consent.
+            try! Data("mutated fixture".utf8).write(to: source)
+            do {
+                try queue.acceptReplacement(addedID, mount: mount, reviewed: current, confirmed: true)
+                preconditionFailure("Changed source inherited consent")
+            } catch TransferError.destinationChanged {} catch { preconditionFailure("Unexpected source refusal: \(error)") }
+            precondition(queue.jobs[1].conflict)
+            try! Data("synthetic inactive MKV fixture".utf8).write(to: source)
+            queue.jobs[1].fingerprint = try! FileIdentity.fingerprint(source)
+            try! store.save(queue.jobs)
+            try! queue.acceptReplacement(addedID, mount: mount, reviewed: current, confirmed: true)
+            precondition(!queue.jobs[1].conflict && queue.jobs[1].status == .waitingForServer)
+            precondition(queue.jobs[1].candidateIndex == 2, "confirmation must not ask for metadata again")
+            precondition((try! Data(contentsOf: final)) == Data("changed server fixture".utf8), "confirmation alone must not write")
+            queue.activeID = addedID; queue.jobs[1].status = .transferring
+            let destination = try! await queue.publishValidatedOutput(addedID, mount: mount, verify: {}, progress: { sample in
+                if sample.bytesCopied == 0 {
+                    await MainActor.run {
+                        queue.enqueue([source])
+                        precondition(queue.jobs.count == 2 && queue.activeID == addedID)
+                    }
+                }
+            })
+            precondition(destination == final && (try! Data(contentsOf: final)) == bytes)
+            precondition((try! Data(contentsOf: output)) == bytes)
+            let backups = try! FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "backup" }
+            precondition(backups.count == 1 && (try! Data(contentsOf: backups[0])) == Data("changed server fixture".utf8))
+            queue.activeID = nil; queue.jobs[1].status = .paused
             queue.removeConfirmedIntervention(addedID)
             precondition(queue.jobs.map(\.id) == [completed.id])
             precondition((try! Data(contentsOf: source)) == Data("synthetic inactive MKV fixture".utf8))
-            precondition((try! Data(contentsOf: final)) == Data("changed server fixture".utf8))
+            precondition((try! Data(contentsOf: final)) == bytes)
             queue.enqueue([source])
             precondition(queue.jobs.count == 2 && queue.activeID == nil && queue.settings.paused)
-            print("REIMPORT_REVIEW_QUEUE_PASS: completed history retained, explicit reimport, watcher suppression, duplicate guard, cancel, stale modal, refreshed consent, unsupported atomic replacement blocked before conversion, metadata retained, real light/dark SwiftUI hosts; scratch only, no network or Subler events")
+            print("REIMPORT_REVIEW_QUEUE_PASS: completed history retained, explicit reimport, watcher suppression, duplicate guard during actual transfer, cancel/no-consent refusal, stale modal, changed source refusal, confirmation -> production executor -> actual native replacement with preserved backup; metadata retained; real light/dark SwiftUI hosts; APFS scratch only, no SMB or Subler events")
             exit(0)
         }
         application.run()

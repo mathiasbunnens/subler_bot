@@ -53,13 +53,14 @@ final class TransferTests: XCTestCase {
             let service = TransferService(directoryPublication: true), job = UUID()
             let state = VerificationState()
             let expected = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
+            let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
             let task = Task {
-                try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, expectedDigest: failure == "digest" ? "wrong" : expected, verify: { try await state.check() }, progress: { sample in
+                try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: failure == "digest" ? "wrong" : expected, verify: { try await state.check() }, progress: { sample in
                     guard sample.verificationBytes == 0 else { return }
                     switch failure {
                     case "corruption":
-                        let stage = try! FileManager.default.contentsOfDirectory(at: share, includingPropertiesForKeys: nil).first { $0.pathExtension == "staging" }!
-                        let file = try! FileHandle(forWritingTo: stage.appendingPathComponent("Movie.mp4"))
+                        let stage = try! FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "new" }!
+                        let file = try! FileHandle(forWritingTo: stage)
                         try! file.write(contentsOf: Data([0xFF])); try! file.close()
                     case "source-mutation":
                         let file = try! FileHandle(forWritingTo: source)
@@ -75,6 +76,8 @@ final class TransferTests: XCTestCase {
                 XCTFail("Unsafe replacement accepted: \(failure)")
             } catch TransferError.integrity {
                 XCTAssertTrue(["digest", "corruption", "source-mutation"].contains(failure))
+            } catch TransferError.destinationChanged {
+                XCTAssertEqual(failure, "source-mutation")
             } catch is CancellationError {
                 XCTAssertEqual(failure, "cancellation")
             } catch SMBError.unavailable {
@@ -219,7 +222,9 @@ final class TransferTests: XCTestCase {
         let old = Data("keep old file".utf8)
         try old.write(to: directory.appendingPathComponent("Movie.mp4"))
         let service = TransferService(), job = UUID()
-        let final = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, verify: {}, progress: { _ in })
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
+        let digest = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
+        let final = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: digest, verify: {}, progress: { _ in })
         XCTAssertEqual(try Data(contentsOf: final), try Data(contentsOf: source))
         let backup = await service.preservedBackup(jobID: job)
         XCTAssertNotNil(backup)
@@ -307,8 +312,10 @@ final class TransferTests: XCTestCase {
         let final = directory.appendingPathComponent("Movie.mp4"), old = Data("old movie".utf8)
         try old.write(to: final)
         let service = TransferService(), job = UUID()
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
+        let digest = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
         do {
-            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, verify: {
+            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: digest, verify: {
                 let files = try FileManager.default.contentsOfDirectory(atPath: directory.path)
                 if files.contains(where: { $0.hasSuffix(".backup") }) { throw SMBError.unavailable }
             }, progress: { _ in })
@@ -326,10 +333,12 @@ final class TransferTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         let final = directory.appendingPathComponent("Movie.mp4"), old = Data("old movie".utf8), job = UUID()
         try old.write(to: final)
-        let part = directory.appendingPathComponent("Movie.mp4.\(job.uuidString).part")
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
+        let digest = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
         do {
-            _ = try await TransferService().copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, verify: {
+            _ = try await TransferService().copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: digest, verify: {
                 if try FileManager.default.contentsOfDirectory(atPath: directory.path).contains(where: { $0.hasSuffix(".backup") }) {
+                    let part = try XCTUnwrap(FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "new" })
                     let handle = try FileHandle(forWritingTo: part)
                     try handle.write(contentsOf: Data([255])); try handle.close()
                 }
@@ -411,10 +420,12 @@ final class TransferTests: XCTestCase {
         try old.write(to: directory.appendingPathComponent("Movie.mp4"))
         try sidecar.write(to: directory.appendingPathComponent("extras/subtitle.srt"))
         let service = TransferService(directoryPublication: true), job = UUID()
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
+        let digest = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
         do {
-            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, verify: {
-                let backups = try FileManager.default.contentsOfDirectory(at: share, includingPropertiesForKeys: nil).filter { $0.pathExtension == "backup" }
-                if backups.contains(where: { FileManager.default.fileExists(atPath: $0.appendingPathComponent("Movie.mp4").path) }) { throw SMBError.unavailable }
+            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: digest, verify: {
+                let backups = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).filter { $0.pathExtension == "backup" }
+                if !backups.isEmpty { throw SMBError.unavailable }
             }, progress: { _ in })
             XCTFail("Expected post-backup verifier failure")
         } catch SMBError.unavailable { }
@@ -431,20 +442,21 @@ final class TransferTests: XCTestCase {
         let original = Data("original film".utf8), competitor = Data("competing film".utf8)
         try original.write(to: final)
         let service = TransferService(directoryPublication: true), job = UUID()
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: .fixture(root: share), movieName: "Movie"))
+        let digest = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
         do {
-            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, verify: {
-                let moved = try FileManager.default.contentsOfDirectory(at: share, includingPropertiesForKeys: nil).contains { $0.pathExtension == "backup" && FileManager.default.fileExists(atPath: $0.appendingPathComponent("Movie.mp4").path) }
-                if moved, !FileManager.default.fileExists(atPath: directory.path) {
-                    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
-                    try competitor.write(to: final)
+            _ = try await service.copy(source: source, mount: .fixture(root: share), movieName: "Movie", jobID: job, replaceExisting: true, replacement: snapshot, expectedDigest: digest, verify: {
+                let saved = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil).first { $0.pathExtension == "backup" }
+                if let saved, (try Data(contentsOf: saved)) == original, (try Data(contentsOf: final)) == original {
+                    try competitor.write(to: final, options: .atomic)
                 }
             }, progress: { _ in })
             XCTFail("Directory rename overwrote a nonempty competitor")
-        } catch TransferError.conflict { }
+        } catch TransferError.destinationChanged { } catch TransferError.unsafePath { }
         XCTAssertEqual(try Data(contentsOf: final), competitor)
         let backup = await service.preservedBackup(jobID: job)
         let saved = try XCTUnwrap(backup)
-        XCTAssertEqual(try Data(contentsOf: saved.appendingPathComponent("Movie.mp4")), original)
+        XCTAssertEqual(try Data(contentsOf: saved), original)
     }
 
     func testDirectoryPublicationDigestValidationAndIdempotence() async throws {
@@ -463,11 +475,17 @@ final class TransferTests: XCTestCase {
         XCTAssertEqual(identity, try FileManager.default.attributesOfItem(atPath: second.path)[.systemFileNumber] as? NSNumber)
     }
 
-    func testRealSMBReplacementRefusesWithoutAtomicExchange() async throws {
-        guard ProcessInfo.processInfo.environment["SUBLER_TEST_SMB"] == "1" else { throw XCTSkip("Opt-in SMB replacement refusal") }
+    func testRealSMBConfirmedReplacementInUniqueScratchDirectory() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["SUBLER_TEST_SMB_REPLACEMENT"] == "I_ALLOW_UNIQUE_SCRATCH_FIXTURE",
+              let allowedRoot = environment["SUBLER_TEST_SMB_REPLACEMENT_MOUNT"] else {
+            throw XCTSkip("NOT SMB certification: requires explicit permission for one unique scratch directory and exact mount")
+        }
         let (root, _, source) = try fixture(); defer { try? FileManager.default.removeItem(at: root) }
-        let mount = try await SMBService().mountedShare(configuration: .init())
-        let name = "Subler Automation QA " + UUID().uuidString
+        let configuration = SMBConfiguration.firstLaunchDefault()
+        let mount = try await SMBService().mountedShare(configuration: configuration)
+        guard mount.root.path == allowedRoot else { throw TransferError.unsafePath }
+        let name = "Subler Replacement QA Amélie " + UUID().uuidString
         let directory = mount.root.appendingPathComponent(name), final = directory.appendingPathComponent(name + ".mp4")
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
@@ -477,21 +495,18 @@ final class TransferTests: XCTestCase {
         print("REAL_SMB_REPLACEMENT_FIXTURE: \(directory.path)")
         let service = TransferService(), job = UUID()
         let expected = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
-        do {
-            _ = try await service.copy(source: source, mount: mount, movieName: name, jobID: job, replaceExisting: true, expectedDigest: expected, verify: { XCTFail("Unsupported replacement entered transfer") }, progress: { _ in XCTFail("Unsupported replacement copied bytes") })
-            XCTFail("Unsafe SMB replacement accepted")
-        } catch TransferError.replacementUnavailable { }
+        let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: mount, movieName: name))
+        let finalURL = try await service.copy(source: source, mount: mount, movieName: name, jobID: job,
+                                             replaceExisting: true, replacement: snapshot, expectedDigest: expected,
+                                             verify: { _ = try await SMBService().mountedShare(configuration: configuration) }, progress: { _ in })
         let backup = await service.preservedBackup(jobID: job)
-        XCTAssertNil(backup)
-        XCTAssertEqual(try Data(contentsOf: final), original)
+        XCTAssertEqual(finalURL, final)
+        XCTAssertEqual(try Data(contentsOf: final), try Data(contentsOf: source))
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(backup)), original)
         XCTAssertEqual(try Data(contentsOf: directory.appendingPathComponent("fixture.srt")), sidecar)
-        // No recursive deletion; refuse cleanup if any foreign child appeared.
-        guard Set(try FileManager.default.contentsOfDirectory(atPath: directory.path)) == Set([name + ".mp4", "fixture.srt"]) else { throw TransferError.unsafePath }
-        try FileManager.default.removeItem(at: final)
-        try FileManager.default.removeItem(at: directory.appendingPathComponent("fixture.srt"))
-        try FileManager.default.removeItem(at: directory)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-        print("REAL_SMB_REPLACEMENT_REFUSAL_VERIFIED: original film + subtitle untouched; owned fixtures cleaned")
+        // Leave the exact fixture/journal/backups for independent review. Never
+        // delete by prefix, recursively clean the share, or touch personal films.
+        print("REAL_SMB_REPLACEMENT_VERIFIED: validated bytes published; original backup + subtitle retained at \(directory.path)")
     }
 
     func testRealSMBTransferIntoUniqueTestDirectory() async throws {

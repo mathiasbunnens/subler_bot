@@ -2,7 +2,7 @@ import XCTest
 @testable import AutomationCore
 
 final class ReplacementReviewTests: XCTestCase {
-    func testUnsupportedReplacementFailsBeforeIOAndPreservesWholeDestination() async throws {
+    func testUnvalidatedReplacementFailsBeforeIOAndPreservesWholeDestination() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let directory = root.appendingPathComponent("Movie")
@@ -10,13 +10,13 @@ final class ReplacementReviewTests: XCTestCase {
         let final = directory.appendingPathComponent("Movie.mp4"), sidecar = directory.appendingPathComponent("subtitle.srt")
         try Data("old film".utf8).write(to: final)
         try Data("subtitle".utf8).write(to: sidecar)
-        let mount = VerifiedMount.fixture(root: root, allowsReplacement: false)
+        let mount = VerifiedMount.fixture(root: root)
         let snapshot = try XCTUnwrap(DestinationSnapshot.capture(mount: mount, movieName: "Movie"))
         let service = TransferService(), id = UUID()
         do {
             _ = try await service.copy(source: root.appendingPathComponent("nonexistent-input.mp4"), mount: mount, movieName: "Movie", jobID: id, replaceExisting: true, replacement: snapshot, verify: { XCTFail("No transfer or I/O before capability gate") }, progress: { _ in XCTFail("No copy") })
-            XCTFail("Unsupported replacement accepted")
-        } catch TransferError.replacementUnavailable { }
+            XCTFail("Unvalidated replacement accepted")
+        } catch TransferError.integrity { }
         XCTAssertEqual(try Data(contentsOf: final), Data("old film".utf8))
         XCTAssertEqual(try Data(contentsOf: sidecar), Data("subtitle".utf8))
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: root.path), ["Movie"])

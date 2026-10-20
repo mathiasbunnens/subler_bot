@@ -30,7 +30,17 @@ final class JobQueueService: ObservableObject {
     private var ticking = false
     private var serverRetryAfter = Date.distantPast
     private var authenticationGate = SMBAuthenticationGate()
-    private var replacements: [UUID: DestinationSnapshot] = [:]
+    private struct ReplacementConsent {
+        let snapshot: DestinationSnapshot
+        let sourcePath: String
+        let fingerprint: String
+        let outputDigest: String?
+        func matches(_ job: MovieJob) -> Bool {
+            sourcePath == job.sourcePath && fingerprint == job.fingerprint &&
+            (outputDigest == nil || outputDigest == job.validatedDigest)
+        }
+    }
+    private var replacements: [UUID: ReplacementConsent] = [:]
     private var fatalPersistenceError = false
 
     var currentJob: MovieJob? { jobs.first { $0.id == activeID } }
@@ -412,11 +422,15 @@ final class JobQueueService: ObservableObject {
                 try update(id) { $0.status = .waitingForServer; $0.error = "Préparez l’accès au partage monté dans Réglages → Autorisations. Le MP4 reste dans le dossier temporaire." }
                 return
             }
-            if replacements[id] == nil, let snapshot = try DestinationSnapshot.capture(mount: mount, movieName: value.displayName) {
+            _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
+            let recoveredDestination = try await transfer.recoverReplacement(source: URL(fileURLWithPath: localPath), mount: mount, movieName: value.displayName, jobID: id, expectedDigest: digest, verify: {
+                let current = try await self.smb.mountedShare(configuration: configuration)
+                guard current.root == mount.root, current.origin == mount.origin else { throw TransferError.destinationChanged }
+            }, progress: { sample in await self.setProgress(sample) })
+            if recoveredDestination == nil, replacements[id] == nil, let snapshot = try DestinationSnapshot.capture(mount: mount, movieName: value.displayName) {
                 try update(id) { $0.status = .paused; $0.conflict = true; $0.destinationSnapshot = snapshot; $0.smbConfiguration = configuration; $0.error = snapshot.summary + "\nMP4 validé conservé localement. Confirmez le remplacement ou retirez la tâche." }
                 return
             }
-            _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: localPath), source: source, root: URL(fileURLWithPath: workRoot), jobID: id, expectedDigest: digest)
             try Task.checkCancellation()
             if value.posterPath.map({ !PosterExtractor.isOwned($0, workRoot: workRoot, jobID: id) }) ?? true {
                 // Artwork is optional: a film without a cover shows the placeholder.
@@ -426,13 +440,19 @@ final class JobQueueService: ObservableObject {
             }
             try update(id) { $0.status = .transferring; $0.error = nil }
             let server = smb
-            let replacement = replacements.removeValue(forKey: id)
-            let destination = try await transfer.copy(source: URL(fileURLWithPath: localPath), mount: mount, movieName: value.displayName, jobID: id, replaceExisting: replacement != nil, replacement: replacement, expectedDigest: digest, verify: {
-                let current = try await server.mountedShare(configuration: configuration)
-                guard current.root == mount.root, current.origin == mount.origin else { throw UserFacingError("Montage SMB modifié pendant la copie.") }
-            }, progress: { sample in
-                await self.setProgress(sample)
-            })
+            let destination: URL
+            if let recoveredDestination {
+                replacements.removeValue(forKey: id)
+                destination = recoveredDestination
+            }
+            else {
+                destination = try await publishValidatedOutput(id, mount: mount, verify: {
+                    let current = try await server.mountedShare(configuration: configuration)
+                    guard current.root == mount.root, current.origin == mount.origin else { throw UserFacingError("Montage SMB modifié pendant la copie.") }
+                }, progress: { sample in
+                    await self.setProgress(sample)
+                })
+            }
             let backup = await transfer.preservedBackup(jobID: id)
             try update(id) { $0.status = .completed; $0.destinationPath = destination.path; $0.backupPath = backup?.path; $0.error = nil; $0.conflict = false }
             hasCompletedThisSession = true
@@ -456,7 +476,7 @@ final class JobQueueService: ObservableObject {
             var conflict = false
             if case TransferError.conflict = error { conflict = true }
             if case TransferError.destinationChanged = error { conflict = true }
-            if case TransferError.replacementUnavailable = error { conflict = true }
+
             let value = try? job(id)
             if value?.status == .completed {
                 message = "Film transféré, nettoyage local impossible : \(text)"
@@ -468,6 +488,25 @@ final class JobQueueService: ObservableObject {
             try? update(id) { $0.status = conflict ? .paused : waiting ? .waitingForServer : .failed; $0.error = text; $0.backupPath = backup?.path; $0.conflict = conflict }
             notify(id, text)
         }
+    }
+    /// Shared production/harness executor. A queued confirmation is one-use and
+    /// cannot migrate to a different source, job, or previously validated output.
+    func publishValidatedOutput(_ id: UUID, mount: VerifiedMount,
+                                verify: @escaping @Sendable () async throws -> Void,
+                                progress: @escaping @Sendable (TransferProgress) async -> Void) async throws -> URL {
+        let value = try job(id)
+        guard value.validated, let path = value.localPath, let root = value.workRoot,
+              let digest = value.validatedDigest else { throw TransferError.integrity }
+        let consent = replacements.removeValue(forKey: id)
+        let source = URL(fileURLWithPath: value.sourcePath)
+        if let consent {
+            guard consent.matches(value), try FileIdentity.fingerprint(source) == consent.fingerprint else { throw TransferError.destinationChanged }
+        }
+        _ = try await GeneratedOutput.verify(url: URL(fileURLWithPath: path), source: source,
+                                            root: URL(fileURLWithPath: root), jobID: id, expectedDigest: digest)
+        return try await transfer.copy(source: URL(fileURLWithPath: path), mount: mount, movieName: value.displayName,
+                                       jobID: id, replaceExisting: consent != nil, replacement: consent?.snapshot,
+                                       expectedDigest: digest, verify: verify, progress: progress)
     }
     func select(_ candidate: MetadataCandidate, for id: UUID) {
         guard activeID != id, let value = try? job(id), !value.validated, value.localPath == nil, requireSourceForConversion(id) else { return }
@@ -560,6 +599,15 @@ final class JobQueueService: ObservableObject {
         guard activeID != id, let value = try? job(id), value.conflict else { return }
         Task { await reviewReplacement(id, expected: value.destinationSnapshot) }
     }
+    func replacementSourceDetails(_ value: MovieJob) -> String {
+        let path = value.validated ? (value.localPath ?? value.sourcePath) : value.sourcePath
+        let kind = value.validated ? "MP4 validé" : "MKV source (conversion à venir)"
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let size = attributes[.size] as? NSNumber, let date = attributes[.modificationDate] as? Date else {
+            return "\(kind) : \(path)\nFichier actuellement inaccessible."
+        }
+        return "\(kind) : \(path)\n\(ByteCountFormatter.string(fromByteCount: size.int64Value, countStyle: .file)) · modifié le \(date.formatted(date: .numeric, time: .standard))"
+    }
     /// Returns nil after refreshing a changed/legacy target: a second action is required.
     func replacementReviewSnapshot(_ id: UUID, mount: VerifiedMount, expected: DestinationSnapshot?) throws -> DestinationSnapshot? {
         guard activeID != id, let value = try? job(id), value.conflict else { return nil }
@@ -573,9 +621,9 @@ final class JobQueueService: ObservableObject {
     func acceptReplacement(_ id: UUID, mount: VerifiedMount, reviewed: DestinationSnapshot, confirmed: Bool) throws {
         guard confirmed, activeID != id, let latest = try? job(id), latest.conflict, latest.destinationSnapshot == reviewed else { return }
         try reviewed.requireUnchanged(mount: mount, movieName: latest.displayName)
-        try mount.requireReplacementSupport()
-        replacements[id] = reviewed
+        guard try FileIdentity.fingerprint(URL(fileURLWithPath: latest.sourcePath)) == latest.fingerprint else { throw TransferError.destinationChanged }
         try update(id) { $0.conflict = false; $0.status = $0.validated ? .waitingForServer : .pending; $0.error = nil }
+        replacements[id] = ReplacementConsent(snapshot: reviewed, sourcePath: latest.sourcePath, fingerprint: latest.fingerprint, outputDigest: latest.validatedDigest)
         Task { await tick() }
     }
     private func reviewReplacement(_ id: UUID, expected: DestinationSnapshot?) async {
@@ -586,7 +634,7 @@ final class JobQueueService: ObservableObject {
             guard let current = try replacementReviewSnapshot(id, mount: mount, expected: expected) else { return }
             let alert = NSAlert()
             alert.messageText = "Remplacer \(value.displayName) sur le serveur ?"
-            alert.informativeText = current.summary + "\n\nLe remplacement n’est autorisé que si la cible est inchangée et un échange atomique sûr est disponible. Sinon il sera bloqué, sans déplacer l’original ni lancer une conversion inutile."
+            alert.informativeText = current.summary + "\n\n" + replacementSourceDetails(value) + "\n\nLe MP4 validé sera copié et vérifié dans ce même dossier, puis publié par l’API native. Une sauvegarde vérifiée de l’ancien film sera conservée. Une cible modifiée exige une nouvelle validation. Sur SMB, une coupure peut nécessiter une récupération ; l’atomicité du serveur n’est pas garantie. Ne modifiez pas ce film avec un autre logiciel pendant l’opération."
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Annuler")
             alert.addButton(withTitle: "Confirmer le remplacement")
