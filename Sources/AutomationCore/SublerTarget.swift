@@ -32,6 +32,12 @@ public struct SublerTarget: Sendable {
     public var bundleIdentifier: String { isBackground ? "local.sublerautomation.Subler" : "org.galad.Subler" }
 
     public func validatedApplicationURL() throws -> URL? {
+        try validatedApplicationURL(runningApplicationURLs: {
+            NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).compactMap(\.bundleURL)
+        })
+    }
+
+    internal func validatedApplicationURL(runningApplicationURLs: () -> [URL]) throws -> URL? {
         guard let path = backgroundApplication else { return nil }
         guard path.hasPrefix("/"), path.hasSuffix(".app") else {
             throw AutomationServiceError.message("Local Subler opt-in requires an absolute .app path.")
@@ -42,7 +48,12 @@ public struct SublerTarget: Sendable {
               bundle.object(forInfoDictionaryKey: "LSBackgroundOnly") as? Bool == true else {
             throw AutomationServiceError.message("Local Subler is missing or is not the reviewed background build. No installed-app fallback was attempted.")
         }
-        try validateRunningApplicationURLs(NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).compactMap(\.bundleURL), expected: url)
+        guard let executable = bundle.executableURL,
+              (try? executable.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+              FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw AutomationServiceError.message("Local Subler has no usable executable. No installed-app fallback was attempted.")
+        }
+        try validateRunningApplicationURLs(runningApplicationURLs(), expected: url)
         return url
     }
 

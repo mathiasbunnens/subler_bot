@@ -18,6 +18,24 @@ final class SublerBundleTargetTests: XCTestCase {
         XCTAssertEqual(target.backgroundApplication, "/delivery/Subler Background.app")
     }
 
+    func testEnvironmentOverridePresenceAndInvalidEmbeddedPrecedence() {
+        for path in ["", "relative.app", "/missing/Background.app"] {
+            let target = SublerTarget(environment: [SublerTarget.environmentKey: path], bundleInfo: [:], bundleURL: appURL)
+            XCTAssertTrue(target.isBackground)
+            XCTAssertEqual(target.backgroundApplication, path)
+            XCTAssertThrowsError(try target.validatedApplicationURL())
+        }
+        let malformed: [[String: Any]] = [
+            ["SublerAutomationEngine": ""], ["SublerAutomationEngine": 2],
+            ["SublerAutomationBackgroundRelativePath": ""],
+            ["SublerAutomationEngine": "background", "SublerAutomationBackgroundRelativePath": false]]
+        for info in malformed {
+            let target = SublerTarget(environment: [SublerTarget.environmentKey: "/dev/Background.app"], bundleInfo: info, bundleURL: appURL)
+            XCTAssertEqual(target.backgroundApplication, "")
+            XCTAssertThrowsError(try target.validatedApplicationURL())
+        }
+    }
+
     func testInvalidBundleSelectionAndMissingSiblingFailClosed() {
         let cases: [[String: Any]] = [localInfo, ["SublerAutomationBackgroundRelativePath": "../Subler Background.app"], ["SublerAutomationEngine": "typo"],
             ["SublerAutomationEngine": false], ["SublerAutomationEngine": "background"],
@@ -33,6 +51,33 @@ final class SublerBundleTargetTests: XCTestCase {
         let expected = SublerTarget(environment: ProcessInfo.processInfo.environment,
                                     bundleInfo: Bundle.main.infoDictionary, bundleURL: Bundle.main.bundleURL)
         XCTAssertEqual(SublerTarget().backgroundApplication, expected.backgroundApplication)
+    }
+
+    func testLocalMetadataWithoutUsableExecutableFailsClosed() throws {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".hermes/cache/scratch").appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appendingPathComponent("Subler Background.app")
+        let macOS = app.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        let info: [String: Any] = ["CFBundleIdentifier": "local.sublerautomation.Subler",
+            "CFBundleExecutable": "FixtureEngine", "CFBundlePackageType": "APPL",
+            "SublerAutomationBackgroundProtocol": "2", "LSBackgroundOnly": true]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: app.appendingPathComponent("Contents/Info.plist"))
+        let target = SublerTarget(backgroundApplication: app.path)
+        XCTAssertTrue(target.isBackground)
+        XCTAssertEqual(target.bundleIdentifier, "local.sublerautomation.Subler")
+        XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "Metadata alone is not a usable engine")
+        let executable = macOS.appendingPathComponent("FixtureEngine")
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: executable.path)
+        XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "Non-executable file must be refused")
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        XCTAssertEqual(try target.validatedApplicationURL(runningApplicationURLs: { [] })?.path, app.path)
+        try FileManager.default.removeItem(at: executable)
+        try FileManager.default.createDirectory(at: executable, withIntermediateDirectories: false)
+        XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "An executable directory is not an engine")
     }
 
     func testSignedLocalBundleSelectsSiblingWithoutEnvironment() {

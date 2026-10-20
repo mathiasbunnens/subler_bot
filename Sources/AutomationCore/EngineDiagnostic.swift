@@ -15,6 +15,11 @@ public struct EngineDiagnostic: Encodable {
     public let error: String?
 
     public init(bundle: Bundle = .main, target: SublerTarget = SublerTarget()) {
+        self.init(bundle: bundle, target: target,
+                  installedApplicationURL: target.isBackground ? nil : NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier))
+    }
+
+    internal init(bundle: Bundle, target: SublerTarget, installedApplicationURL: URL?) {
         bundleIdentifier = bundle.bundleIdentifier ?? "hors bundle"
         build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "indisponible"
         commit = bundle.object(forInfoDictionaryKey: "SublerAutomationCommit") as? String ?? "indisponible"
@@ -23,10 +28,13 @@ public struct EngineDiagnostic: Encodable {
         background = target.isBackground
         targetBundleIdentifier = target.bundleIdentifier
         applicationPath = target.backgroundApplication
-            ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleIdentifier)?.path
+            ?? installedApplicationURL?.path
             ?? "Subler installé introuvable"
         do {
             _ = try target.validatedApplicationURL()
+            if !target.isBackground && installedApplicationURL == nil {
+                throw AutomationServiceError.message("Subler installé introuvable · \(target.bundleIdentifier)")
+            }
             valid = true
             error = nil
         } catch {

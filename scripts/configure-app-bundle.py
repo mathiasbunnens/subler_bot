@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Preflight output ownership, then stamp build selection before signing."""
 import argparse
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -19,6 +20,10 @@ if args.local_engine:
     assert info['CFBundleIdentifier'] == 'local.sublerautomation.Subler'
     assert info['SublerAutomationBackgroundProtocol'] == '2'
     assert info['LSBackgroundOnly'] is True
+    executable_name = info.get('CFBundleExecutable')
+    assert isinstance(executable_name, str) and executable_name and Path(executable_name).name == executable_name, 'Local engine has no usable executable'
+    executable = engine / 'Contents/MacOS' / executable_name
+    assert executable.is_file() and os.access(executable, os.X_OK), 'Local engine has no usable executable'
     subprocess.run(['codesign', '--verify', '--deep', '--strict', engine], check=True)
 if args.check_only:
     raise SystemExit(0)
