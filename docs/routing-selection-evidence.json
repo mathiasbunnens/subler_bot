@@ -1,0 +1,105 @@
+{
+  "head": {
+    "exit": 0,
+    "stdout": "48024b604acb14a92d6471ce40a7499f0a0b748c",
+    "stderr": ""
+  },
+  "processes": {
+    "exit": 0,
+    "stdout": "10111 Mon Oct 19 15:48:25 2026     /Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Background.app/Contents/MacOS/Subler\n74216 Mon Oct 19 17:18:24 2026     /Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation.app/Contents/MacOS/SublerAutomation",
+    "stderr": ""
+  },
+  "bundles": [
+    {
+      "path": "dist/Subler Automation.app",
+      "metadata": {
+        "CFBundleIdentifier": "com.mathiasbunnens.SublerAutomation",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "4"
+      },
+      "binaryMtimeEpoch": 1792363329.1403358,
+      "signature": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Executable=/Users/mathiasbunnens/Downloads/SublerAutomation/dist/Subler Automation.app/Contents/MacOS/SublerAutomation\nIdentifier=com.mathiasbunnens.SublerAutomation\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=6620 flags=0x2(adhoc) hashes=200+3 location=embedded\nSignature=adhoc\nInfo.plist entries=18\nTeamIdentifier=not set\nSealed Resources version=2 rules=13 files=1\nInternal requirements count=0 size=12"
+      },
+      "verification": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "path": "dist-local/Subler Automation.app",
+      "metadata": {
+        "CFBundleIdentifier": "com.mathiasbunnens.SublerAutomation",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "4"
+      },
+      "binaryMtimeEpoch": 1792417971.500276,
+      "signature": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Executable=/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation.app/Contents/MacOS/SublerAutomation\nIdentifier=com.mathiasbunnens.SublerAutomation\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=6684 flags=0x2(adhoc) hashes=202+3 location=embedded\nSignature=adhoc\nInfo.plist entries=18\nTeamIdentifier=not set\nSealed Resources version=2 rules=13 files=1\nInternal requirements count=0 size=12"
+      },
+      "verification": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "path": "dist-local/Subler Automation Local.app",
+      "metadata": {
+        "CFBundleIdentifier": "com.mathiasbunnens.SublerAutomation.Local",
+        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "5",
+        "SublerAutomationEngine": "background",
+        "SublerAutomationBackgroundRelativePath": "../Subler Background.app",
+        "SublerAutomationCommit": "48024b604acb14a92d6471ce40a7499f0a0b748c"
+      },
+      "binaryMtimeEpoch": 1792481928.5253396,
+      "signature": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Executable=/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Automation Local.app/Contents/MacOS/SublerAutomation\nIdentifier=com.mathiasbunnens.SublerAutomation.Local\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=6850 flags=0x2(adhoc) hashes=207+3 location=embedded\nSignature=adhoc\nInfo.plist entries=21\nTeamIdentifier=not set\nSealed Resources version=2 rules=13 files=1\nInternal requirements count=0 size=12"
+      },
+      "verification": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "path": "dist-local/Subler Background.app",
+      "metadata": {
+        "CFBundleIdentifier": "local.sublerautomation.Subler",
+        "CFBundleShortVersionString": "1.9.5",
+        "CFBundleVersion": "1.9.5",
+        "SublerAutomationBackgroundProtocol": "2",
+        "LSBackgroundOnly": true
+      },
+      "binaryMtimeEpoch": 1792417631.023618,
+      "signature": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": "Executable=/Users/mathiasbunnens/Downloads/SublerAutomation/dist-local/Subler Background.app/Contents/MacOS/Subler\nIdentifier=local.sublerautomation.Subler\nFormat=app bundle with Mach-O thin (arm64)\nCodeDirectory v=20400 size=9654 flags=0x2(adhoc) hashes=295+3 location=embedded\nSignature=adhoc\nInfo.plist entries=37\nTeamIdentifier=not set\nSealed Resources version=2 rules=13 files=230\nInternal requirements count=0 size=12"
+      },
+      "verification": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  ],
+  "historicalSelection": {
+    "exit": 0,
+    "stdout": "PASS exact 1da55a9 resolver: absent opt-in selects org.galad.Subler; explicit opt-in selects local.sublerautomation.Subler",
+    "stderr": ""
+  },
+  "currentSelection": {
+    "exit": 0,
+    "stdout": "{\"sourceDirty\":false,\"targetBundleIdentifier\":\"local.sublerautomation.Subler\",\"valid\":true,\"commit\":\"48024b604acb14a92d6471ce40a7499f0a0b748c\",\"executablePath\":\"\\/Users\\/mathiasbunnens\\/Downloads\\/SublerAutomation\\/dist-local\\/Subler Automation Local.app\\/Contents\\/MacOS\\/SublerAutomation\",\"bundleIdentifier\":\"com.mathiasbunnens.SublerAutomation.Local\",\"applicationPath\":\"\\/Users\\/mathiasbunnens\\/Downloads\\/SublerAutomation\\/dist-local\\/Subler Background.app\",\"background\":true,\"build\":\"5\"}",
+    "stderr": ""
+  }
+}
