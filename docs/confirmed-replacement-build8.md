@@ -1,6 +1,6 @@
 # Confirmed replacement — build 8 candidate (t_cc77a812)
 
-Status: implemented and exercised on local APFS; NOT certified for production SMB. Do not activate this candidate automatically. The running build 7 and its sibling Background engine are deliberately untouched.
+Status: implemented and exercised on local APFS and the mounted SMB share with synthetic bytes. User explicitly accepted the exclusive-writer usage condition and authorized one bounded scratch directory (Kanban comment, 2026-10-20). This is NOT a server compare-and-swap or power-loss certification. Do not activate this candidate automatically. The running build 7 and its sibling Background engine are deliberately untouched.
 
 ## Implemented
 
@@ -22,7 +22,7 @@ Status: implemented and exercised on local APFS; NOT certified for production SM
 - Actual light/dark SwiftUI host rendering passes at 380×572 points. Inspected captures show wrapped source/target paths, dates, sizes and accessible confirmation/removal controls without visible clipping. Final harness evidence: `/Users/mathiasbunnens/.hermes/cache/scratch/manual-metadata-queue-0mmnzhb5/`. Previous equivalent inspected captures: `manual-metadata-queue-eze5oum5` under the same scratch parent.
 - `python3 scripts/menu-ui-contract.py`: five checks pass. `git diff --check`: clean.
 
-## Explicit unresolved guarantees / blockers
+## Limits recorded before the authorized SMB run
 
 1. Real SMB certification requires permission to create ONE exclusively owned directory `Subler Replacement QA Amélie <UUID>` at the mounted Movies share, only a few MB of synthetic data, with backup/journal retained for inspection. Mount presence was discovered through mount metadata only. NO server file was written, replaced, removed, mounted or disconnected in this run. No personal movie was searched or processed.
 2. NSFileCoordinator does not serialize an uncoordinated writer on another SMB client. Revalidating immediately before a native replacement is NOT portable compare-and-swap. A deterministic last-instruction-race test demonstrates this explicitly: the third-party bytes are retained in `.backup.native`, the reviewed original is retained independently, the new output can already occupy the final path, and the operation/recovery refuse to report success. Thus strict “never displace a changed third-party target” remains UNSATISFIED for that window. Certification needs either an agreed exclusive-writer protocol or a server/backend supporting conditional publication; do not claim that testing a cooperative SMB happy path proves this stronger guarantee.
@@ -52,4 +52,25 @@ The test leaves its exact UUID directory, synthetic final, subtitle, backups and
 - Original sibling engine executable SHA-256: `ed75ed860da1d1e2139292c2c692cdfca6bbacd8802fc9a1c824ba62c46369fb`.
 - The unrelated untracked `.vscode/` and `.worktrees/` remain excluded from commits. No process was stopped/restarted, no TCC database was modified, and no personal/server media was touched.
 
-Handoff remains blocked for explicit bounded scratch-SMB permission and the strict multi-client no-displacement guarantee described above. A working APFS preview is not final acceptance of those outstanding criteria; do not silently close the card or activate the candidate.
+## Authorized real-SMB acceptance (2026-10-21)
+
+The user answered « oui vasy » to the grouped scratch-test authorization and exclusive-writer usage condition. This accepts an operational protocol: do not concurrently replace the same movie from another client/application. It does not add technical exclusion of external writers or make the race in item 2 disappear.
+
+Only `TransferTests.testRealSMBConfirmedReplacementInUniqueScratchDirectory` was enabled, after verifying `/Volumes/Movies` is the mounted smbfs share. Exactly ONE directory was created:
+
+    /Volumes/Movies/Subler Replacement QA Amélie 774D306C-2C5B-4CA3-B2FC-DB3830184679
+
+The first run failed closed during initial `DestinationSnapshot.capture` (`unsafePath`), BEFORE transfer/publication. No backup, stage or journal was created by that failed attempt. Subsequent read-only path/descriptor inspection found consistent identities; the exact cause of the initial transient mismatch is not established. Production identity checks were NOT weakened. The test now supports an explicit `SUBLER_TEST_SMB_REPLACEMENT_RESUME_NAME` for this diagnostic situation: it verifies a UUID name, exact two-child listing and both original synthetic contents before proceeding. It refuses a committed or otherwise changed fixture. The retry reused this SAME directory, not a second one.
+
+Result: 1 test executed, zero skipped, zero failures, 1.621 seconds. The actual native replacement published 2,500,000 validated synthetic bytes; the old 22-byte version survives in BOTH independent and native backups, and the 14-byte subtitle is unchanged. An independent Python readback then verified the final SHA-256 against the journal, both backup contents, the subtitle and absence of the consumed stage. All five owned files remain for inspection; no server cleanup, personal film access or disconnect was performed.
+
+- Final SHA-256: `ada844147596e8d96e1fb1546a992a8ab67a1bfb23c59da90b75b346eedad48f`.
+- Both backup SHA-256: `6ec96891e962dde17599deb866665c9a8e368fcd11e2bf6e33875d9c71a0e2ba`.
+- Transaction prefix: `.subler-replace-50626B1E-2161-46C5-9E51-7F50BE54FC02-BDB38D11-5B35-4E52-89D6-BB0E3BCA6351` (suffixes `.backup`, `.backup.native`, `.json`).
+- Initial fail-closed log: `~/.hermes/profiles/codex-dev-2/cache/scratch/t_cc77a812-real-smb.log`.
+- Successful test log: `~/.hermes/profiles/codex-dev-2/cache/scratch/t_cc77a812-real-smb-resume.log`.
+- Independent readback log: `~/.hermes/profiles/codex-dev-2/cache/scratch/t_cc77a812-smb-independent-readback.log`.
+- Full local suite rerun with SMB disabled: 198 tests, 16 skipped, zero failures; `~/.hermes/profiles/codex-dev-2/cache/scratch/t_cc77a812-resume-full-tests.log`. The separately enabled SMB test above is the actual SMB evidence, not these skips.
+- Five menu UI contracts pass again. Strict/deep signatures and original engine SHA-256 match. Actual signed bundle diagnostic passes, including missing-engine fail-closed check; build remains 1.1.0(8), embedded source `7ed5a9f775e9e089978d8534ea7780078c4c679d`, `sourceDirty=false`. No production source changed during this acceptance run; no rebuild or activation was needed.
+
+Delivery is accepted under the user-approved exclusive-writer protocol. Server disconnect/power-loss durability and noncooperating multi-client conditional publication remain unproven, not silently certified. Allow space for the new output plus approximately two old-version copies; retained backups require deliberate manual review/removal. A transient unsafe snapshot can still require a refreshed review/retry. No app/engine restart, TCC or preferences change, push or publication occurred.

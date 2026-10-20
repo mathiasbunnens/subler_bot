@@ -485,13 +485,29 @@ final class TransferTests: XCTestCase {
         let configuration = SMBConfiguration.firstLaunchDefault()
         let mount = try await SMBService().mountedShare(configuration: configuration)
         guard mount.root.path == allowedRoot else { throw TransferError.unsafePath }
-        let name = "Subler Replacement QA Amélie " + UUID().uuidString
+        let prefix = "Subler Replacement QA Amélie "
+        let resumedName = environment["SUBLER_TEST_SMB_REPLACEMENT_RESUME_NAME"]
+        let name = resumedName ?? (prefix + UUID().uuidString)
+        guard name.hasPrefix(prefix), UUID(uuidString: String(name.dropFirst(prefix.count))) != nil,
+              !name.contains("/") else { throw TransferError.unsafePath }
         let directory = mount.root.appendingPathComponent(name), final = directory.appendingPathComponent(name + ".mp4")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         let original = Data("owned original fixture".utf8), sidecar = Data("owned subtitle".utf8)
-        try original.write(to: final)
-        try sidecar.write(to: directory.appendingPathComponent("fixture.srt"))
+        if resumedName != nil {
+            // Explicitly resume only the untouched synthetic fixture from a failed
+            // pre-publication run. Never create a second server directory or
+            // overwrite a previously committed result on a diagnostic retry.
+            let children = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            guard Set(children) == Set([name + ".mp4", "fixture.srt"]),
+                  try Data(contentsOf: final) == original,
+                  try Data(contentsOf: directory.appendingPathComponent("fixture.srt")) == sidecar else {
+                throw TransferError.unsafePath
+            }
+        } else {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: directory.path))
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+            try original.write(to: final)
+            try sidecar.write(to: directory.appendingPathComponent("fixture.srt"))
+        }
         print("REAL_SMB_REPLACEMENT_FIXTURE: \(directory.path)")
         let service = TransferService(), job = UUID()
         let expected = SHA256.hash(data: try Data(contentsOf: source)).map { String(format: "%02x", $0) }.joined()
