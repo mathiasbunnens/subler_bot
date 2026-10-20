@@ -3,6 +3,33 @@ import AppKit
 import ServiceManagement
 import AutomationCore
 
+// Pure presentation of the shared diagnostic; never resolve a second target here.
+struct EngineAboutPresentation {
+    let diagnostic: EngineDiagnostic
+
+    var variant: String {
+        switch diagnostic.bundleIdentifier {
+        case "com.mathiasbunnens.SublerAutomation.Local": return "Locale"
+        case "com.mathiasbunnens.SublerAutomation": return "Normale"
+        default: return "Développement / identité non reconnue"
+        }
+    }
+    var validation: String {
+        diagnostic.valid ? "Cible valide" : "Cible invalide — traitement bloqué"
+    }
+    var sourceState: String {
+        guard diagnostic.commit != "indisponible" else { return "Provenance indisponible" }
+        return diagnostic.sourceDirty ? "Avec modifications locales" : "Sans modifications locales"
+    }
+    var path: String { diagnostic.applicationPath.isEmpty ? "Chemin non résolu" : diagnostic.applicationPath }
+    var fallbackNotice: String? {
+        diagnostic.background ? "Aucun repli vers Subler installé si le moteur local est absent ou invalide." : nil
+    }
+    var validationScope: String {
+        "Validation de la cible uniquement : ne confirme ni un moteur en cours d’exécution, ni l’autorisation macOS Automation, ni une conversion réussie."
+    }
+}
+
 // Remember only the exact Settings host; orderOut/rehosting must not lose its identity.
 @MainActor
 enum SettingsWindowFocus {
@@ -134,19 +161,29 @@ struct SettingsView: View {
 
     private var engine: some View {
         let diagnostic = EngineDiagnostic()
+        let presentation = EngineAboutPresentation(diagnostic: diagnostic)
         return Form {
             Section {
                 Text(diagnostic.label).font(.headline)
+                LabeledContent("Identité de la cible", value: diagnostic.targetBundleIdentifier)
+                Text(presentation.validation).fontWeight(.medium)
+                    .foregroundStyle(diagnostic.valid ? Color.secondary : Color.red)
                 Text(diagnostic.status).foregroundStyle(diagnostic.valid ? Color.secondary : Color.red)
-                Text(diagnostic.applicationPath).textSelection(.enabled)
-                Text("Aucun repli vers Subler installé si le moteur local est absent ou invalide.")
+                LabeledContent("Chemin de la cible") { Text(presentation.path).textSelection(.enabled) }
+                if let notice = presentation.fallbackNotice {
+                    Text(notice).font(.caption).foregroundStyle(.secondary)
+                }
+                Text(presentation.validationScope)
                     .font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Moteur sélectionné") }
+            } header: { Text("Moteur configuré / sélectionné") }
             Section {
                 Text(AppVersion.current.details)
+                LabeledContent("Variante de l’application", value: presentation.variant)
+                LabeledContent("Numéro de build", value: diagnostic.build)
                 Text("Commit : \(diagnostic.commit)")
+                Text(presentation.sourceState)
                 Text("Application : \(diagnostic.bundleIdentifier)")
-                Text(diagnostic.executablePath)
+                LabeledContent("Exécutable") { Text(diagnostic.executablePath) }
             } header: { Text("Build exécuté") }
             .font(.caption).textSelection(.enabled)
         }.formStyle(.grouped)
