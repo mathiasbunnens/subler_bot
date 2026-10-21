@@ -14,6 +14,8 @@ final class SublerBackgroundTests: XCTestCase {
             let target = SublerTarget(backgroundApplication: path)
             XCTAssertEqual(target.bundleIdentifier, "local.sublerautomation.Subler")
             XCTAssertThrowsError(try target.validatedApplicationURL())
+            do { try await target.launchBackgroundIfNeeded(); XCTFail("Invalid target must not launch") }
+            catch { XCTAssertFalse(error.localizedDescription.contains("osascript")) }
             let service = SublerService(target: target)
             do { _ = try await service.queueState(destination: URL(fileURLWithPath: "/nonexistent/output.mp4")); XCTFail("Must reject before any Apple Event") }
             catch { XCTAssertFalse(error.localizedDescription.contains("osascript")) }

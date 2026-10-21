@@ -92,6 +92,10 @@ enum PermissionNativeAccess {
     @MainActor static func launchSublerIfNeeded() async -> Bool {
         guard ProcessInfo.processInfo.environment["SUBLER_AUTOMATION_TEST_ROOT"] == nil else { return true }
         let target = SublerTarget()
+        if target.isBackground {
+            do { try await target.launchBackgroundIfNeeded(); return true }
+            catch { return false }
+        }
         let localURL: URL?
         do { localURL = try target.validatedApplicationURL() } catch { return false }
         if !NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleIdentifier).isEmpty { return true }

@@ -34,6 +34,7 @@ public actor SublerService {
         }
         let path = AppleScriptService.literal(source.path)
         if target.isBackground {
+            try await target.launchBackgroundIfNeeded()
             let result = try await AppleScriptService.run("""
             tell \(try target.applicationClause())
                 set backgroundState to background state
@@ -96,6 +97,7 @@ public actor SublerService {
     }
 
     private func queueItem(destination: URL) async throws -> (id: String, state: String)? {
+        if target.isBackground { try await target.launchBackgroundIfNeeded() }
         let result = try await AppleScriptService.run("""
         tell \(try target.applicationClause())
             set matchingIndex to 0

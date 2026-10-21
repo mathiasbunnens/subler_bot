@@ -67,8 +67,29 @@ public struct SublerTarget: Sendable {
         }
     }
 
+    @MainActor public func launchBackgroundIfNeeded() async throws {
+        guard let url = try validatedApplicationURL() else { return }
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty { return }
+        // AppleScript path syntax alone may relaunch a different registered copy.
+        // Launch this exact URL and verify it before sending any media Apple Event.
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = false
+        configuration.createsNewApplicationInstance = true
+        let app = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+        guard let actual = app.bundleURL else {
+            throw AutomationServiceError.message("Launched local Subler has no bundle URL.")
+        }
+        try validateRunningApplicationURLs([actual], expected: url)
+        _ = try validatedApplicationURL()
+    }
+
     internal func applicationClause() throws -> String {
-        if let url = try validatedApplicationURL() { return "application \(AppleScriptService.literal(url.path))" }
+        if let url = try validatedApplicationURL() {
+            guard !NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier).isEmpty else {
+                throw AutomationServiceError.message("Exact local Subler must be launched before sending Apple Events.")
+            }
+            return "application \(AppleScriptService.literal(url.path))"
+        }
         return "application id \(AppleScriptService.literal(bundleIdentifier))"
     }
     internal func documentArgument(_ document: SublerDocument, role: String) throws -> String {

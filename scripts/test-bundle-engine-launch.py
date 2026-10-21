@@ -42,7 +42,7 @@ assert not owned_pids(), 'Refusing to reuse/stop an already running release'
 out, err = root / 'diagnostic.json', root / 'diagnostic.stderr'
 run(['open', '-g', '-n', '-W', '--stdout', out, '--stderr', err, app, '--args', '--diagnose-target'])
 diag = json.loads(out.read_text())
-assert diag['valid'] and diag['background'] and diag['applicationPath'] == str(app / 'Contents/Helpers/Subler Background.app'), diag
+assert diag['valid'] and diag['background'] and Path(diag['applicationPath']).samefile(app / 'Contents/Helpers/Subler Background.app'), diag
 assert not (root / 'jobs.json').exists()
 (root / 'Source').mkdir()
 source = root / 'Source/Generated.2026.mkv'
@@ -88,10 +88,17 @@ try:
     seek = run([args.probe, 'inspect', output, 'seek'])
     assert 'decodedImages=48' in decode and 'status=2 error=(null)' in decode, decode
     assert 'decodedImages=3' in seek, seek
+    media = json.loads(run(['/opt/homebrew/bin/ffprobe', '-v', 'error', '-show_streams', '-show_format', '-of', 'json', output]))
+    assert any(s['codec_type'] == 'video' and s['codec_tag_string'] == 'hvc1' for s in media['streams']), media
+    assert any(s['codec_type'] == 'audio' for s in media['streams']), media
+    assert float(media['format']['duration']) > 0
+    assert media['format']['tags']['title'] == 'Generated Finder launch'
+    assert media['format']['tags']['date'] == '2026'
+    (root / 'ffprobe.json').write_text(json.dumps(media, indent=2))
     (root / 'decode.log').write_text(decode)
     (root / 'seek.log').write_text(seek)
     report = dict(diagnostic=diag, output=str(output), jobID=job['id'],
-                  validated=True, images=48, seekImages=3, sourceUnchanged=True,
+                  validated=True, images=48, seekImages=3, sourceUnchanged=True, videoTag='hvc1', audioPreserved=True,
                   settingsRoot=str(root), launch='LaunchServices actual release, only TEST_ROOT override',
                   limits=['permission preflight injected by TEST_ROOT', 'no user media, SMB or TV', 'native mappings checked by separate rich fixture'])
     (root / 'report.json').write_text(json.dumps(report, indent=2))
