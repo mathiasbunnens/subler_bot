@@ -9,6 +9,7 @@ public struct EngineDiagnostic: Encodable {
     public let sourceDirty: Bool
     public let executablePath: String
     public let background: Bool
+    public let embedded: Bool
     public let targetBundleIdentifier: String
     public let applicationPath: String
     public let valid: Bool
@@ -26,6 +27,7 @@ public struct EngineDiagnostic: Encodable {
         sourceDirty = bundle.object(forInfoDictionaryKey: "SublerAutomationSourceDirty") as? Bool ?? false
         executablePath = bundle.executableURL?.path ?? "indisponible"
         background = target.isBackground
+        embedded = background && bundle.object(forInfoDictionaryKey: "SublerAutomationBackgroundRelativePath") as? String == "Contents/Helpers/Subler Background.app"
         targetBundleIdentifier = target.bundleIdentifier
         applicationPath = target.backgroundApplication
             ?? installedApplicationURL?.path
@@ -43,6 +45,8 @@ public struct EngineDiagnostic: Encodable {
         }
     }
 
-    public var label: String { background ? "Moteur : Subler Background (local)" : "Moteur : Subler installé" }
+    public var label: String {
+        embedded ? "Moteur : Subler Background (embarqué)" : (background ? "Moteur : Subler Background (local)" : "Moteur : Subler installé")
+    }
     public var status: String { error ?? "Cible vérifiée · \(targetBundleIdentifier)" }
 }

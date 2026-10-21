@@ -9,7 +9,7 @@ struct EngineAboutPresentation {
 
     var variant: String {
         switch diagnostic.bundleIdentifier {
-        case "com.mathiasbunnens.SublerAutomation.Local": return "Locale"
+        case "com.mathiasbunnens.SublerAutomation.Local": return diagnostic.embedded ? "Autonome · moteur embarqué" : "Locale"
         case "com.mathiasbunnens.SublerAutomation": return "Normale"
         default: return "Développement / identité non reconnue"
         }

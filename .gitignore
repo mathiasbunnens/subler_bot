@@ -9,6 +9,7 @@ xcuserdata/
 dist/
 dist-update/
 dist-local/
+dist-standalone/
 
 # Separately licensed native checkouts; reproducible patches are tracked instead.
 vendor-local/

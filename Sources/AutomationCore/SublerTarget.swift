@@ -13,8 +13,12 @@ public struct SublerTarget: Sendable {
     public init(environment: [String: String], bundleInfo: [String: Any]?, bundleURL: URL) {
         if bundleInfo?["SublerAutomationEngine"] != nil || bundleInfo?["SublerAutomationBackgroundRelativePath"] != nil {
             // A present but malformed/unknown configuration is deliberately invalid,
-            // not the absence of opt-in. Only the reviewed co-local sibling is allowed.
+            // not the absence of opt-in. Only reviewed bundle-relative layouts are allowed.
             if bundleInfo?["SublerAutomationEngine"] as? String == "background",
+               bundleInfo?["SublerAutomationBackgroundRelativePath"] as? String == "Contents/Helpers/Subler Background.app" {
+                backgroundApplication = bundleURL.appendingPathComponent("Contents/Helpers/Subler Background.app")
+                    .standardizedFileURL.path
+            } else if bundleInfo?["SublerAutomationEngine"] as? String == "background",
                bundleInfo?["SublerAutomationBackgroundRelativePath"] as? String == "../Subler Background.app" {
                 backgroundApplication = bundleURL.deletingLastPathComponent()
                     .appendingPathComponent("Subler Background.app").standardizedFileURL.path

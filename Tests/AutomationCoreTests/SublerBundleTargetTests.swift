@@ -53,11 +53,23 @@ final class SublerBundleTargetTests: XCTestCase {
         XCTAssertEqual(SublerTarget().backgroundApplication, expected.backgroundApplication)
     }
 
+    func testEmbeddedBundleMovesWithCallerAndIgnoresEnvironment() {
+        let info: [String: Any] = ["SublerAutomationEngine": "background",
+            "SublerAutomationBackgroundRelativePath": "Contents/Helpers/Subler Background.app"]
+        for location in ["/Applications/Subler Automation.app", "/scratch/Applications déplacées/Subler Automation.app"] {
+            let target = SublerTarget(environment: [SublerTarget.environmentKey: "/old/Subler Background.app"],
+                                      bundleInfo: info, bundleURL: URL(fileURLWithPath: location))
+            XCTAssertEqual(target.backgroundApplication, location + "/Contents/Helpers/Subler Background.app")
+            XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }))
+        }
+    }
+
     func testLocalMetadataWithoutUsableExecutableFailsClosed() throws {
         let root = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".hermes/cache/scratch").appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let app = root.appendingPathComponent("Subler Background.app")
+        let caller = root.appendingPathComponent("Applications déplacées/Subler Automation.app")
+        let app = caller.appendingPathComponent("Contents/Helpers/Subler Background.app")
         let macOS = app.appendingPathComponent("Contents/MacOS")
         try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
         let info: [String: Any] = ["CFBundleIdentifier": "local.sublerautomation.Subler",
@@ -65,7 +77,8 @@ final class SublerBundleTargetTests: XCTestCase {
             "SublerAutomationBackgroundProtocol": "2", "LSBackgroundOnly": true]
         try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
             .write(to: app.appendingPathComponent("Contents/Info.plist"))
-        let target = SublerTarget(backgroundApplication: app.path)
+        let target = SublerTarget(environment: [:], bundleInfo: ["SublerAutomationEngine": "background",
+            "SublerAutomationBackgroundRelativePath": "Contents/Helpers/Subler Background.app"], bundleURL: caller)
         XCTAssertTrue(target.isBackground)
         XCTAssertEqual(target.bundleIdentifier, "local.sublerautomation.Subler")
         XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "Metadata alone is not a usable engine")
@@ -75,6 +88,7 @@ final class SublerBundleTargetTests: XCTestCase {
         XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "Non-executable file must be refused")
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         XCTAssertEqual(try target.validatedApplicationURL(runningApplicationURLs: { [] })?.path, app.path)
+        XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [root.appendingPathComponent("Old.app")] }))
         try FileManager.default.removeItem(at: executable)
         try FileManager.default.createDirectory(at: executable, withIntermediateDirectories: false)
         XCTAssertThrowsError(try target.validatedApplicationURL(runningApplicationURLs: { [] }), "An executable directory is not an engine")

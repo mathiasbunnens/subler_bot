@@ -37,6 +37,9 @@ fixture = r'''
                 "CFBundleShortVersionString": "1.1.0", "CFBundleVersion": "6",
                 "SublerAutomationSourceDirty": dirty]
             if let commit { info["SublerAutomationCommit"] = commit }
+            if name == "Embedded" {
+                info["SublerAutomationBackgroundRelativePath"] = "Contents/Helpers/Subler Background.app"
+            }
             try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
                 .write(to: app.appendingPathComponent("Contents/Info.plist"))
             return Bundle(url: app)!
@@ -44,6 +47,10 @@ fixture = r'''
         let normal = try bundle("Normal", id: "com.mathiasbunnens.SublerAutomation", dirty: false)
         let local = try bundle("Local", id: "com.mathiasbunnens.SublerAutomation.Local", dirty: true)
         let unknown = try bundle("Unknown", id: "test.unknown", dirty: false, commit: nil)
+        let embedded = try bundle("Embedded", id: "com.mathiasbunnens.SublerAutomation.Local", dirty: false)
+        let embeddedDiagnostic = EngineDiagnostic(bundle: embedded, target: SublerTarget(backgroundApplication: root.appendingPathComponent("Missing.app").path), installedApplicationURL: nil)
+        precondition(embeddedDiagnostic.embedded && embeddedDiagnostic.label.contains("embarqué"))
+        precondition(EngineAboutPresentation(diagnostic: embeddedDiagnostic).variant == "Autonome · moteur embarqué")
         let installed = SublerTarget(backgroundApplication: nil)
         // Inject a synthetic installed lookup, never inspect or launch installed Subler.
         let valid = EngineDiagnostic(bundle: normal, target: installed, installedApplicationURL: root.appendingPathComponent("Installed.app"))

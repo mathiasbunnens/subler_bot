@@ -81,6 +81,27 @@ class BundlePackagingTests(unittest.TestCase):
                 self.assertIn('usable executable', result.stderr)
                 self.assertEqual((self.app / 'Contents/Info.plist').read_bytes(), before)
 
+    def test_embedded_package_is_self_contained_with_clean_name(self):
+        result = self.configure('--embedded-engine', '--engine-source', str(self.engine))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        info = plistlib.loads((self.app / 'Contents/Info.plist').read_bytes())
+        self.assertEqual(info['CFBundleDisplayName'], 'Subler Automation')
+        self.assertEqual(info['CFBundleIdentifier'], 'com.mathiasbunnens.SublerAutomation.Local')
+        self.assertEqual(info['SublerAutomationBackgroundRelativePath'], 'Contents/Helpers/Subler Background.app')
+        nested = self.app / info['SublerAutomationBackgroundRelativePath']
+        self.assertEqual((nested / 'Contents/MacOS/FixtureEngine').read_bytes(), self.executable.read_bytes())
+        self.assertNotIn('NSServices', info)
+
+    def test_preflight_refuses_running_nested_engine_without_mutation(self):
+        tools = Path(self.env['PATH'].split(os.pathsep)[0])
+        nested = self.app / 'Contents/Helpers/Subler Background.app/Contents/MacOS/Subler'
+        (tools / 'ps').write_text('#!/bin/sh\nprintf "%s\\n" "' + str(nested) + '"\n')
+        before = (self.app / 'Contents/Info.plist').read_bytes()
+        result = self.configure('--embedded-engine', '--engine-source', str(self.engine), '--check-only')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('running', result.stderr)
+        self.assertEqual((self.app / 'Contents/Info.plist').read_bytes(), before)
+
 
 if __name__ == '__main__':
     unittest.main()

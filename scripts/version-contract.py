@@ -46,9 +46,11 @@ class VersionContracts(unittest.TestCase):
         self.assertEqual(built.pop('SublerAutomationCommit'), subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip())
         self.assertIsInstance(built.pop('SublerAutomationSourceDirty'), bool)
         if built.get('SublerAutomationEngine') == 'background':
-            expected.update(CFBundleName='Subler Automation Local', CFBundleDisplayName='Subler Automation Local',
+            embedded = built['SublerAutomationBackgroundRelativePath'] == 'Contents/Helpers/Subler Background.app'
+            name = 'Subler Automation' if embedded else 'Subler Automation Local'
+            expected.update(CFBundleName=name, CFBundleDisplayName=name,
                             CFBundleIdentifier='com.mathiasbunnens.SublerAutomation.Local',
-                            SublerAutomationEngine='background', SublerAutomationBackgroundRelativePath='../Subler Background.app')
+                            SublerAutomationEngine='background', SublerAutomationBackgroundRelativePath='Contents/Helpers/Subler Background.app' if embedded else '../Subler Background.app')
             expected.pop('NSServices')
         self.assertEqual(built, expected)
         bin_path = subprocess.check_output(['swift', 'build', '-c', 'release', '--show-bin-path'], cwd=ROOT, text=True).strip()

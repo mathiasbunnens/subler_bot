@@ -42,7 +42,7 @@ assert not owned_pids(), 'Refusing to reuse/stop an already running release'
 out, err = root / 'diagnostic.json', root / 'diagnostic.stderr'
 run(['open', '-g', '-n', '-W', '--stdout', out, '--stderr', err, app, '--args', '--diagnose-target'])
 diag = json.loads(out.read_text())
-assert diag['valid'] and diag['background'] and diag['applicationPath'] == str(app.parent / 'Subler Background.app'), diag
+assert diag['valid'] and diag['background'] and diag['applicationPath'] == str(app / 'Contents/Helpers/Subler Background.app'), diag
 assert not (root / 'jobs.json').exists()
 (root / 'Source').mkdir()
 source = root / 'Source/Generated.2026.mkv'

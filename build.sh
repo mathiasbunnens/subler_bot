@@ -4,7 +4,10 @@ cd "$(dirname "$0")"
 export TMPDIR="${SUBLER_BUILD_SCRATCH:-$HOME/.hermes/cache/scratch}"
 mkdir -p "$TMPDIR" dist
 OPTIONS=()
-if [[ "${SUBLER_BUILD_LOCAL_ENGINE:-0}" == 1 ]]; then
+if [[ "${SUBLER_BUILD_EMBEDDED_ENGINE:-0}" == 1 ]]; then
+  APP="${SUBLER_BUILD_APP:-$PWD/dist-standalone/Subler Automation.app}"
+  OPTIONS+=(--embedded-engine --engine-source "${SUBLER_BUILD_ENGINE_SOURCE:-$PWD/dist-local/Subler Background.app}")
+elif [[ "${SUBLER_BUILD_LOCAL_ENGINE:-0}" == 1 ]]; then
   APP="${SUBLER_BUILD_APP:-$PWD/dist-local/Subler Automation Local.app}"
   OPTIONS+=(--local-engine)
 else
