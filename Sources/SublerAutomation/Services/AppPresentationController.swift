@@ -15,6 +15,7 @@ final class AppPresentationController {
 
     func bind(_ queue: JobQueueService) {
         self.queue = queue
+        AppPresentationDelegate.queue = queue
         dockBadgeObserver = queue.$jobs.combineLatest(queue.$settings)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] jobs, settings in
@@ -68,8 +69,24 @@ final class AppPresentationController {
 
 @MainActor
 final class AppPresentationDelegate: NSObject, NSApplicationDelegate {
+    static weak var queue: JobQueueService?
+    private let termination = GracefulTermination()
+    private var replyTask: Task<Void, Never>?
+    private var signals: [DispatchSourceSignal] = []
     func applicationDidFinishLaunching(_ notification: Notification) {
         FinderServiceProvider.shared.register()
+        // Catchable external shutdown follows the same drain as Cmd-Q. SIGKILL,
+        // power loss and OS force-quit cannot be intercepted.
+        for number in [SIGTERM, SIGINT] {
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
+            source.setEventHandler {
+                RunLoop.main.perform {
+                    MainActor.assumeIsolated { NSApplication.shared.terminate(nil) }
+                }
+            }
+            source.resume(); signals.append(source)
+        }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         AppPresentationController.shared.showMainWindow()
@@ -78,9 +95,19 @@ final class AppPresentationDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard AppleTVPreparationModel.shared.isBusy else { return .terminateNow }
-        Task { @MainActor in
-            await AppleTVPreparationModel.shared.cancelAndWait()
+        guard replyTask == nil else { return .terminateLater }
+        let queue = Self.queue
+        queue?.beginTermination()
+        AppleTVPreparationModel.shared.beginTermination()
+        let task = termination.request(drain: {
+            async let preparation: Void = AppleTVPreparationModel.shared.drainForTermination()
+            if let queue { await queue.drainForTermination() }
+            await preparation
+        }, finish: {
+            if let queue { await queue.shutdownEmbeddedEngine() }
+        })
+        replyTask = Task { @MainActor in
+            await task.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

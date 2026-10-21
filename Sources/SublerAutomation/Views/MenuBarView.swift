@@ -120,6 +120,7 @@ struct MenuBarView: View {
         }
         .background(MenuWindowAutoSizer(height: rootHeight))
         .controlSize(.small)
+        .disabled(queue.isTerminating)
     }
 
     // Short panels keep their intrinsic height. Scrolling exists only when the

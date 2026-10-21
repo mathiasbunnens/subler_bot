@@ -19,5 +19,7 @@ git -C "$source_root/MP42Foundation" submodule update --init --recursive
 git -C "$source_root" apply --check "$patch_root/subler.patch"
 git -C "$source_root/MP42Foundation" apply --check "$patch_root/mp42foundation.patch"
 git -C "$source_root" apply "$patch_root/subler.patch"
+git -C "$source_root" apply --check "$patch_root/graceful-quit.patch"
+git -C "$source_root" apply "$patch_root/graceful-quit.patch"
 git -C "$source_root/MP42Foundation" apply "$patch_root/mp42foundation.patch"
 printf '%s\n' 'Pinned local-only sources prepared. See docs/local-subler-background.md before building.'

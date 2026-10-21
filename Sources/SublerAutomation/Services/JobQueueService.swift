@@ -27,6 +27,9 @@ final class JobQueueService: ObservableObject {
     private var stability = FileStabilityTracker()
     private var timer: Timer?
     private var worker: Task<Void, Never>?
+    private var startupTask: Task<Void, Never>?
+    @Published private(set) var isTerminating = false
+    private var terminationPersisted = false
     private var ticking = false
     private var serverRetryAfter = Date.distantPast
     private var authenticationGate = SMBAuthenticationGate()
@@ -69,7 +72,7 @@ final class JobQueueService: ObservableObject {
             Task { @MainActor in await self?.tick() }
         }
         permissionObserver = self.permissions.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
-        Task { await prepareStartupPermissions(); await tick() }
+        startupTask = Task { await prepareStartupPermissions(); await tick() }
     }
     private func permissionScopes() -> [PermissionScope] {
         var scopes = [PermissionScope(settings: settings)]
@@ -81,21 +84,23 @@ final class JobQueueService: ObservableObject {
     }
     private func prepareStartupPermissions() async {
         defer { preparingPermissions = false }
-        guard !fatalPersistenceError else { return }
+        guard !isTerminating, !fatalPersistenceError else { return }
         for scope in permissionScopes() {
+            guard !isTerminating else { return }
             await permissions.startup(scope)
-            guard permissions.isReady(for: scope) else { return }
+            guard !isTerminating, permissions.isReady(for: scope) else { return }
         }
         do { try ensureLocalFolders() } catch { message = error.localizedDescription }
     }
     func preparePermissions() {
-        guard worker == nil, permissionTask == nil, !preparingPermissions else { return }
+        guard !isTerminating, worker == nil, permissionTask == nil, !preparingPermissions else { return }
         preparingPermissions = true
         permissionTask = Task {
             defer { preparingPermissions = false; permissionTask = nil }
             for scope in permissionScopes() {
+                guard !isTerminating else { return }
                 await permissions.prepare(scope)
-                guard permissions.isReady(for: scope) else { return }
+                guard !isTerminating, permissions.isReady(for: scope) else { return }
             }
             do { try ensureLocalFolders() } catch { message = error.localizedDescription; return }
         }
@@ -165,7 +170,7 @@ final class JobQueueService: ObservableObject {
     }
     func enqueue(_ urls: [URL]) { enqueue(urls, explicit: true) }
     private func enqueue(_ urls: [URL], explicit: Bool) {
-        guard !fatalPersistenceError, let store else { return }
+        guard !isTerminating, !fatalPersistenceError, let store else { return }
         for url in urls where url.pathExtension.lowercased() == "mkv" {
             guard url.isFileURL, LocalPathPolicy.isValidAbsolutePath(url.path) else {
                 message = "Ajout impossible : choisissez un fichier MKV avec un chemin absolu valide."
@@ -251,11 +256,11 @@ final class JobQueueService: ObservableObject {
         }
     }
     func tick() async {
-        guard !ticking, !fatalPersistenceError, !preparingPermissions else { return }
+        guard !isTerminating, !ticking, !fatalPersistenceError, !preparingPermissions else { return }
         ticking = true; defer { ticking = false }
         let scope = PermissionScope(settings: settings)
         await permissions.recheck(scope)
-        guard permissions.isReady(for: scope), scope == PermissionScope(settings: settings) else { return }
+        guard !isTerminating, permissions.isReady(for: scope), scope == PermissionScope(settings: settings) else { return }
         scan()
         guard worker == nil, !settings.paused else { return }
         for value in jobs where value.status == .pending && !value.needsSelection {
@@ -276,6 +281,7 @@ final class JobQueueService: ObservableObject {
         }
     }
     private func start(_ id: UUID) {
+        guard !isTerminating else { return }
         if let value = try? job(id), value.status == .pending, value.localPath == nil,
            let currentIdentity = try? FileIdentity.fingerprint(URL(fileURLWithPath: value.sourcePath)) {
             do { try update(id) { $0.fingerprint = currentIdentity } }
@@ -677,7 +683,41 @@ final class JobQueueService: ObservableObject {
     private func setProgress(_ sample: TransferProgress) { progress = sample }
     func openSource() { NSWorkspace.shared.open(URL(fileURLWithPath: settings.sourcePath)) }
     func openLogs() { NSWorkspace.shared.open(AppSettings.file.deletingLastPathComponent().appendingPathComponent("automation.log")) }
-    func quit() { saveSettings(); worker?.cancel(); NSApplication.shared.terminate(nil) }
+    func quit() {
+        // AppKit's terminateLater runs a nested event loop. Leave any calling
+        // Swift concurrency task before entering it, or its main-actor executor
+        // can prevent the drain tasks from ever running.
+        RunLoop.main.perform {
+            MainActor.assumeIsolated { NSApplication.shared.terminate(nil) }
+        }
+    }
+    func beginTermination() {
+        guard !isTerminating else { return }
+        isTerminating = true
+        timer?.invalidate(); timer = nil
+        message = "Fermeture demandée : attente de la fin sûre du traitement en cours."
+        store?.log(message!)
+    }
+    func drainForTermination() async {
+        beginTermination()
+        // Do not cancel: import, native conversion, validated publication and cleanup
+        // must finish normally. Pending jobs remain persisted for the next launch.
+        await startupTask?.value
+        await permissionTask?.value
+        while ticking { try? await Task.sleep(nanoseconds: 100_000_000) }
+        await worker?.value
+        do { try persist(); try settings.save(); terminationPersisted = true }
+        catch { message = "Fermeture : état non sauvegardé, moteur conservé. \(error.localizedDescription)" }
+    }
+    func shutdownEmbeddedEngine() async {
+        guard terminationPersisted, !fatalPersistenceError else {
+            store?.log("Moteur conservé : persistance indisponible.")
+            return
+        }
+        let diagnostic = await subler.shutdownEmbeddedEngine()
+        store?.log("Fermeture : \(diagnostic)")
+        NSLog("Subler Automation : %@", diagnostic)
+    }
     private func notify(_ id: UUID, _ text: String) {
         let category = (try? job(id).status.rawValue) ?? "error"
         notifications.send(key: id.uuidString + category, text: text, enabled: settings.notifications)

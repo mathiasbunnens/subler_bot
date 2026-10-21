@@ -17,6 +17,10 @@ for checkout, base, patch in [
         subprocess.run(['tar', '-xf', '-', '-C', temp], input=archive, check=True)
         subprocess.run(['git', 'apply', '--check', diff], cwd=temp, check=True)
         subprocess.run(['git', 'apply', diff], cwd=temp, check=True)
+        if patch == 'subler.patch':
+            shutdown = root / 'patches/local-subler/graceful-quit.patch'
+            subprocess.run(['git', 'apply', '--check', shutdown], cwd=temp, check=True)
+            subprocess.run(['git', 'apply', shutdown], cwd=temp, check=True)
         files = [line[6:] for line in diff.read_text().splitlines() if line.startswith('+++ b/')]
         assert files
         for name in files:

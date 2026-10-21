@@ -81,6 +81,9 @@ public struct SublerTarget: Sendable {
         }
         try validateRunningApplicationURLs([actual], expected: url)
         _ = try validatedApplicationURL()
+        if let identity = EngineProcessIdentity(app) {
+            EmbeddedEngineLifetime.ownership.recordLaunch(identity)
+        }
     }
 
     internal func applicationClause() throws -> String {

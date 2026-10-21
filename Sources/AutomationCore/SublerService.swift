@@ -25,6 +25,7 @@ public actor SublerService {
     private var sources: [SublerDocument: URL] = [:]
     private var nextBackgroundID = 0
     private var converting = false
+    private var ownedQueueIDs: Set<String> = []
     private let target: SublerTarget
     public init(target: SublerTarget = SublerTarget()) { self.target = target }
 
@@ -176,6 +177,7 @@ public actor SublerService {
             guard let item = ownedItem, item.state == "ready" else {
                 throw AutomationServiceError.message("Subler did not create the expected ready queue item for \(destination.path).")
             }
+            ownedQueueIDs.insert(item.id)
             _ = try await AppleScriptService.run("""
             tell \(try target.applicationClause())
                 set ownedIndex to 0
@@ -214,6 +216,13 @@ public actor SublerService {
             }
             try await Task.sleep(nanoseconds: 1_000_000_000)
         }
+    }
+
+    public func shutdownEmbeddedEngine() async -> String {
+        guard !converting, sources.isEmpty else {
+            return "Moteur conservé : conversion ou document encore détenu/inconnu."
+        }
+        return await target.quitEmbeddedIfOwnedAndIdle(ownedQueueIDs: ownedQueueIDs)
     }
 
     public func close(document: SublerDocument) async {

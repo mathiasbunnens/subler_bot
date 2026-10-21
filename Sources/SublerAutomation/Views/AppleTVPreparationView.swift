@@ -18,6 +18,7 @@ final class AppleTVPreparationModel: ObservableObject {
     @Published var allowDynamicHDRLoss = false { didSet { acknowledged = false } }
     @Published var acknowledged = false
     private var task: Task<Void, Never>?
+    private var isTerminating = false
 
     var plan: AppleTVPlan? {
         guard let media else { return nil }
@@ -29,7 +30,7 @@ final class AppleTVPreparationModel: ObservableObject {
         catch { return error.localizedDescription }
     }
     func chooseSource() {
-        guard !isBusy else { return }
+        guard !isTerminating, !isBusy else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
         panel.allowsMultipleSelection = false
@@ -37,7 +38,7 @@ final class AppleTVPreparationModel: ObservableObject {
         if panel.runModal() == .OK, let url = panel.url { analyze(url) }
     }
     func analyze(_ url: URL) {
-        guard !isBusy else { return }
+        guard !isTerminating, !isBusy else { return }
         source = url; media = nil; result = nil; acknowledged = false; allowDynamicHDRLoss = false
         status = "Analyse ffprobe…"; fraction = 0; isBusy = true
         task = Task {
@@ -51,7 +52,7 @@ final class AppleTVPreparationModel: ObservableObject {
         }
     }
     func chooseDestination() {
-        guard !isBusy, plan != nil, acknowledged, let source else { return }
+        guard !isTerminating, !isBusy, plan != nil, acknowledged, let source else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mpeg4Movie]
         panel.nameFieldStringValue = source.deletingPathExtension().lastPathComponent + ".AppleTV.mp4"
@@ -60,7 +61,7 @@ final class AppleTVPreparationModel: ObservableObject {
         start(destination: destination)
     }
     func start(destination: URL) {
-        guard !isBusy, plan != nil, acknowledged, let source else { return }
+        guard !isTerminating, !isBusy, plan != nil, acknowledged, let source else { return }
         let selectedMode = mode, trackLoss = allowTrackLoss, dynamicLoss = allowDynamicHDRLoss
         isBusy = true; fraction = 0; result = nil
         status = selectedMode == .preserve ? "Remux sans réencodage vidéo…" : "Encodage vidéo VideoToolbox…"
@@ -82,11 +83,12 @@ final class AppleTVPreparationModel: ObservableObject {
         }
     }
     func cancel() { status = "Annulation et nettoyage…"; task?.cancel() }
-    func cancelAndWait() async {
-        let active = task
-        active?.cancel()
-        await active?.value
+    func beginTermination() { isTerminating = true }
+    func drainForTermination() async {
+        beginTermination()
+        await task?.value
     }
+
     private func safeMessage(_ error: Error) -> String {
         (error as? AutomationServiceError)?.localizedDescription ?? "Échec de préparation ou accès disque refusé. Aucun original n’est modifié."
     }

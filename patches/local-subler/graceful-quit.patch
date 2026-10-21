@@ -1,0 +1,51 @@
+diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
+index de025dd..9dbb358 100644
+--- a/Classes/ScriptCommand.swift
++++ b/Classes/ScriptCommand.swift
+@@ -128,2 +128,30 @@ class SBBackgroundStateScriptCommand: NSScriptCommand {
++// This check and terminate run in the same main-thread Apple Event handler:
++// no other client can insert a document/queue item between them.
++enum BackgroundShutdownPolicy {
++    static func isSafe(documents: Int, windows: Int, active: Bool, working: Bool,
++                       items: [(String, Bool)], owned: Set<String>) -> Bool {
++        documents == 0 && windows == 0 && !active && !working &&
++            Set(items.map { $0.0 }).count == items.count &&
++            items.allSatisfy { owned.contains($0.0) && $0.1 }
++    }
++}
++
++@objc(SBQuitBackgroundScriptCommand)
++class SBQuitBackgroundScriptCommand: NSScriptCommand {
++    override func performDefaultImplementation() -> Any? {
++        guard let text = directParameter as? String else { return "refused: missing ownership" }
++        let queue = QueueController.shared
++        let items = queue.items(at: IndexSet(integersIn: 0..<Int(queue.count)))
++        guard BackgroundShutdownPolicy.isSafe(documents: NSDocumentController.shared.documents.count,
++            windows: NSApp.windows.count, active: NSApp.isActive, working: queue.status == .working,
++            items: items.map { (($0.value(forKey: "uniqueID") as? String) ?? "", $0.status == .completed) },
++            owned: Set(text.split(separator: "\n").map(String.init))) else {
++            return "refused: foreign/unknown documents or queue, or engine not idle"
++        }
++        NSApp.terminate(nil)
++        return "refused: native termination declined"
++    }
++}
++
+ @objc(SBImportFileScriptCommand)
+ class SBImportFileScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
+diff --git a/Subler.sdef b/Subler.sdef
+index 2f606db..2456d9d 100644
+--- a/Subler.sdef
++++ b/Subler.sdef
+@@ -15,6 +15,11 @@
+             <direct-parameter type="text" />
+             <result type="boolean" />
+         </command>
++        <command name="quit background if owned and idle" code="SublBgQt" description="Quit only when no documents/windows and all queue records are completed and owned by the caller.">
++            <cocoa class="SBQuitBackgroundScriptCommand" />
++            <direct-parameter type="text" description="Newline-separated queue IDs created in this caller session." />
++            <result type="text" />
++        </command>
+         <command name="background state" code="SublBgSt" description="Report window count, active state, activation policy and document count for the local test harness.">
+             <cocoa class="SBBackgroundStateScriptCommand" />
+             <result type="text" />
