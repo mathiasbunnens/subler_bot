@@ -1,0 +1,123 @@
+diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
+index 16ada7e..996b15e 100644
+--- a/Classes/ScriptCommand.swift
++++ b/Classes/ScriptCommand.swift
+@@ -77,7 +77,17 @@ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
+ }
+ 
+ /// Audio that AVFoundation/Apple TV cannot decode (DTS, TrueHD...) is transcoded to AAC with
+-/// Subler's native conversion settings; AAC/AC3/E-AC3/ALAC are copied. Text subtitles become tx3g.
++/// Subler's native conversion settings; AAC/AC3/E-AC3/ALAC are copied. Text/SSA subtitles become tx3g.
++/// A subtitle track that cannot be muxed or converted in the background (PGS bitmaps need the UI's OCR)
++/// is skipped and logged; video/audio/other tracks that are not acceptable still refuse the whole import.
++enum BackgroundTrackKind: Equatable { case video, audio, subtitle, other }
++
++enum BackgroundTrackDecision: Equatable {
++    case copy, convertToAAC, convertToTx3g, skip, refuse
++}
++
++// Pure policy below is extracted verbatim by Tests/AutomationCoreTests/BackgroundTrackPolicyTests.swift
++// BEGIN-PURE-POLICY
+ enum BackgroundTrackPolicy {
+     static func audioNeedsAAC(_ format: FourCharCode) -> Bool {
+         let formats: [FourCharCode] = [kMP42AudioCodecType_DTS, kMP42AudioCodecType_TrueHD, kMP42AudioCodecType_MLP,
+@@ -86,17 +96,61 @@ enum BackgroundTrackPolicy {
+             kMP42AudioCodecType_LinearPCM]
+         return formats.contains(format)
+     }
+-    static func subtitleNeedsTx3g(_ format: FourCharCode) -> Bool { format == kMP42SubtitleCodecType_Text }
+-    static func isAcceptable(_ track: MP42Track) -> Bool {
+-        if track is MP42AudioTrack { return isTrackMuxable(track.format) || audioNeedsAAC(track.format) }
+-        return isTrackMuxable(track.format)
++    static func subtitleNeedsTx3g(_ format: FourCharCode) -> Bool {
++        format == kMP42SubtitleCodecType_Text || format == kMP42SubtitleCodecType_SSA
++    }
++    static func decide(kind: BackgroundTrackKind, format: FourCharCode) -> BackgroundTrackDecision {
++        switch kind {
++        case .audio:
++            if audioNeedsAAC(format) { return .convertToAAC }
++            return isTrackMuxable(format) ? .copy : .refuse
++        case .subtitle:
++            if subtitleNeedsTx3g(format) { return .convertToTx3g }
++            return isTrackMuxable(format) ? .copy : .skip
++        case .video, .other:
++            return isTrackMuxable(format) ? .copy : .refuse
++        }
++    }
++}
++// END-PURE-POLICY
++
++extension BackgroundTrackPolicy {
++    static func kind(of track: MP42Track) -> BackgroundTrackKind {
++        if track is MP42AudioTrack { return .audio }
++        if track is MP42SubtitleTrack { return .subtitle }
++        if track is MP42VideoTrack { return .video }
++        return .other
++    }
++    static func describe(_ track: MP42Track) -> String {
++        let code = track.format
++        let bytes = [24, 16, 8, 0].map { UInt8((code >> UInt32($0)) & 0xFF) }
++        let name = (String(bytes: bytes, encoding: .macOSRoman) ?? "?").trimmingCharacters(in: .whitespaces)
++        let language = track.language.isEmpty ? "und" : track.language
++        return "\(name) \(language)"
+     }
+-    static func configure(_ track: MP42Track) {
+-        if let audio = track as? MP42AudioTrack, audioNeedsAAC(audio.format) {
+-            audio.conversionSettings = MP42AudioConversionSettings(format: kMP42AudioCodecType_MPEG4AAC,
+-                bitRate: Prefs.audioBitrate, mixDown: MP42AudioMixdown(Prefs.audioMixdown), drc: Prefs.audioDRC)
+-        } else if track is MP42SubtitleTrack, subtitleNeedsTx3g(track.format) {
++    /// Decisions for every track, or a refusal reason when the import must be refused.
++    static func plan(_ tracks: [MP42Track]) -> (decisions: [BackgroundTrackDecision], refusal: String?) {
++        var decisions: [BackgroundTrackDecision] = []
++        for track in tracks {
++            var decision = decide(kind: kind(of: track), format: track.format)
++            if decision != .skip, decision != .refuse, track.conversionSettings != nil || track.sampleDescriptions.count > 1 {
++                decision = kind(of: track) == .subtitle ? .skip : .refuse
++            }
++            if decision == .refuse { return (decisions, "\(describe(track))") }
++            decisions.append(decision)
++        }
++        return (decisions, nil)
++    }
++    static func configure(_ track: MP42Track, _ decision: BackgroundTrackDecision) {
++        switch decision {
++        case .convertToAAC:
++            if let audio = track as? MP42AudioTrack {
++                audio.conversionSettings = MP42AudioConversionSettings(format: kMP42AudioCodecType_MPEG4AAC,
++                    bitRate: Prefs.audioBitrate, mixDown: MP42AudioMixdown(Prefs.audioMixdown), drc: Prefs.audioDRC)
++            }
++        case .convertToTx3g:
+             track.conversionSettings = MP42ConversionSettings.subtitlesConversion()
++        default: break
+         }
+     }
+ }
+@@ -112,15 +166,24 @@ class SBImportBackgroundFileScriptCommand: NSScriptCommand, ScriptCommandDocumen
+         do {
+             let url = URL(fileURLWithPath: path)
+             let importer = try MP42FileImporter(url: url)
+-            guard !importer.tracks.isEmpty,
+-                  importer.tracks.allSatisfy({ BackgroundTrackPolicy.isAcceptable($0) && $0.conversionSettings == nil && $0.sampleDescriptions.count <= 1 }) else {
++            guard !importer.tracks.isEmpty else {
+                 scriptErrorNumber = -10000
+                 scriptErrorString = "Background import refuses tracks requiring conversion."
+                 return nil
+             }
++            let plan = BackgroundTrackPolicy.plan(importer.tracks)
++            if let refusal = plan.refusal {
++                scriptErrorNumber = -10000
++                scriptErrorString = "Background import refuses tracks requiring conversion. (\(refusal))"
++                return nil
++            }
+             let doc = Document()
+-            for track in importer.tracks {
+-                BackgroundTrackPolicy.configure(track)
++            for (track, decision) in zip(importer.tracks, plan.decisions) {
++                if decision == .skip {
++                    Logger.shared.write(toLog: "sous-titre \(BackgroundTrackPolicy.describe(track)) ignoré (non convertible en arrière-plan)")
++                    continue
++                }
++                BackgroundTrackPolicy.configure(track, decision)
+                 if let audio = track as? MP42AudioTrack { audio.name = audio.prettyTrackName }
+                 doc.mp4.addTrack(track)
+             }

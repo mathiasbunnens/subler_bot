@@ -325,6 +325,7 @@ final class JobQueueService: ObservableObject {
                 if !recovered {
                     try update(id) { $0.status = .importing; $0.error = nil }
                     let document = try await subler.prepare(source: source)
+                    for notice in await IgnoredSubtitleNotice.scan(source: source) { store?.log("\(id): \(notice)") }
                     openedDocument = document
                     try update(id) { $0.documentID = document.id; $0.status = .prettifying }
                     try update(id) { $0.status = .fetchingMetadata }

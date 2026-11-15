@@ -27,7 +27,7 @@ final class FrenchMetadataAndAudioTests: XCTestCase {
         let patch = try String(contentsOf: root.appendingPathComponent("patches/local-subler/background-audio-conversion.patch"), encoding: .utf8)
         for text in [source, patch] {
             for needed in ["kMP42AudioCodecType_DTS", "kMP42AudioCodecType_TrueHD", "kMP42AudioCodecType_MPEG4AAC",
-                           "MP42AudioConversionSettings", "BackgroundTrackPolicy.configure(track)"] {
+                           "MP42AudioConversionSettings", "BackgroundTrackPolicy.configure(track"] {
                 XCTAssertTrue(text.contains(needed), needed)
             }
         }

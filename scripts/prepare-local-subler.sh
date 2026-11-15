@@ -23,5 +23,7 @@ git -C "$source_root" apply --check "$patch_root/graceful-quit.patch"
 git -C "$source_root" apply "$patch_root/graceful-quit.patch"
 git -C "$source_root" apply --check "$patch_root/background-audio-conversion.patch"
 git -C "$source_root" apply "$patch_root/background-audio-conversion.patch"
+git -C "$source_root" apply --check "$patch_root/background-subtitle-policy.patch"
+git -C "$source_root" apply "$patch_root/background-subtitle-policy.patch"
 git -C "$source_root/MP42Foundation" apply "$patch_root/mp42foundation.patch"
 printf '%s\n' 'Pinned local-only sources prepared. See docs/local-subler-background.md before building.'
