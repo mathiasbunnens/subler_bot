@@ -1,0 +1,52 @@
+diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
+index 9dbb358..16ada7e 100644
+--- a/Classes/ScriptCommand.swift
++++ b/Classes/ScriptCommand.swift
+@@ -76,6 +76,31 @@ extension ScriptCommandDocumentTargeting where Self: NSScriptCommand {
+     }
+ }
+ 
++/// Audio that AVFoundation/Apple TV cannot decode (DTS, TrueHD...) is transcoded to AAC with
++/// Subler's native conversion settings; AAC/AC3/E-AC3/ALAC are copied. Text subtitles become tx3g.
++enum BackgroundTrackPolicy {
++    static func audioNeedsAAC(_ format: FourCharCode) -> Bool {
++        let formats: [FourCharCode] = [kMP42AudioCodecType_DTS, kMP42AudioCodecType_TrueHD, kMP42AudioCodecType_MLP,
++            kMP42AudioCodecType_FLAC, kMP42AudioCodecType_Vorbis, kMP42AudioCodecType_Opus,
++            kMP42AudioCodecType_MPEGLayer1, kMP42AudioCodecType_MPEGLayer2, kMP42AudioCodecType_MPEGLayer3,
++            kMP42AudioCodecType_LinearPCM]
++        return formats.contains(format)
++    }
++    static func subtitleNeedsTx3g(_ format: FourCharCode) -> Bool { format == kMP42SubtitleCodecType_Text }
++    static func isAcceptable(_ track: MP42Track) -> Bool {
++        if track is MP42AudioTrack { return isTrackMuxable(track.format) || audioNeedsAAC(track.format) }
++        return isTrackMuxable(track.format)
++    }
++    static func configure(_ track: MP42Track) {
++        if let audio = track as? MP42AudioTrack, audioNeedsAAC(audio.format) {
++            audio.conversionSettings = MP42AudioConversionSettings(format: kMP42AudioCodecType_MPEG4AAC,
++                bitRate: Prefs.audioBitrate, mixDown: MP42AudioMixdown(Prefs.audioMixdown), drc: Prefs.audioDRC)
++        } else if track is MP42SubtitleTrack, subtitleNeedsTx3g(track.format) {
++            track.conversionSettings = MP42ConversionSettings.subtitlesConversion()
++        }
++    }
++}
++
+ @objc(SBImportBackgroundFileScriptCommand)
+ class SBImportBackgroundFileScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
+     override func performDefaultImplementation() -> Any? {
+@@ -88,13 +113,14 @@ class SBImportBackgroundFileScriptCommand: NSScriptCommand, ScriptCommandDocumen
+             let url = URL(fileURLWithPath: path)
+             let importer = try MP42FileImporter(url: url)
+             guard !importer.tracks.isEmpty,
+-                  importer.tracks.allSatisfy({ isTrackMuxable($0.format) && $0.conversionSettings == nil && $0.sampleDescriptions.count <= 1 }) else {
++                  importer.tracks.allSatisfy({ BackgroundTrackPolicy.isAcceptable($0) && $0.conversionSettings == nil && $0.sampleDescriptions.count <= 1 }) else {
+                 scriptErrorNumber = -10000
+                 scriptErrorString = "Background import refuses tracks requiring conversion."
+                 return nil
+             }
+             let doc = Document()
+             for track in importer.tracks {
++                BackgroundTrackPolicy.configure(track)
+                 if let audio = track as? MP42AudioTrack { audio.name = audio.prettyTrackName }
+                 doc.mp4.addTrack(track)
+             }

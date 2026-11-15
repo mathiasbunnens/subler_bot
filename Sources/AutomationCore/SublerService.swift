@@ -27,7 +27,16 @@ public actor SublerService {
     private var converting = false
     private var ownedQueueIDs: Set<String> = []
     private let target: SublerTarget
-    public init(target: SublerTarget = SublerTarget()) { self.target = target }
+    /// Provider language for candidate search AND fetch-and-set. The embedded engine has its own
+    /// defaults domain (local.sublerautomation.Subler) that falls back to English, so it is always explicit.
+    public static let defaultMetadataLanguage = "fr"
+    private let metadataLanguage: String
+    public init(target: SublerTarget = SublerTarget(), metadataLanguage: String = SublerService.defaultMetadataLanguage) {
+        self.target = target
+        self.metadataLanguage = metadataLanguage
+    }
+
+    static func languageClause(_ language: String) -> String { " language \(AppleScriptService.literal(language))" }
 
     public func prepare(source: URL) async throws -> SublerDocument {
         guard source.isFileURL, FileManager.default.isReadableFile(atPath: source.path) else {
@@ -80,7 +89,7 @@ public actor SublerService {
         guard sources[document] != nil else { throw AutomationServiceError.message("Document is not owned by this service.") }
         let result = try await AppleScriptService.run("""
         tell \(try target.applicationClause())
-            set resultsList to fetch metadata candidates \(try target.documentArgument(document, role: "into")) limit 50
+            set resultsList to fetch metadata candidates \(try target.documentArgument(document, role: "into")) limit 50\(Self.languageClause(metadataLanguage))
             set resultText to ""
             repeat with resultLine in resultsList
                 set resultText to resultText & (resultLine as text) & linefeed
@@ -159,7 +168,7 @@ public actor SublerService {
                 repeat with queueIndex from 1 to count of queue items
                     if status of queue item queueIndex is ready or status of queue item queueIndex is working then error "Subler contains a foreign ready or working queue item. Leave it untouched and retry when the queue is idle."
                 end repeat
-                \(try candidate.map { "fetch and set metadata candidate \($0.index) \(try target.documentArgument(document, role: "into"))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
+                \(try candidate.map { "fetch and set metadata candidate \($0.index) \(try target.documentArgument(document, role: "into"))\(Self.languageClause(metadataLanguage))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
             end tell
             """, timeout: 300)
             // The native setter searches synchronously, then schedules its merge on the main queue.
