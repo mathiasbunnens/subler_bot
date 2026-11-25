@@ -90,13 +90,43 @@ public enum MediaValidationService {
         guard let path = paths.first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else {
             throw AutomationServiceError.message("AVFoundation cannot inspect this source container. Install ffprobe (brew install ffmpeg) to verify MKV video/audio preservation; validation is blocked without it.")
         }
-        let json = try await ProcessWorker.run(executable: URL(fileURLWithPath: path), arguments: ["-v", "error", "-show_entries", "stream=codec_type:format=duration", "-of", "json", source.path], timeout: 60)
+        let json = try await ProcessWorker.run(executable: URL(fileURLWithPath: path), arguments: ["-v", "error", "-show_entries", "stream=codec_type,codec_name:stream_disposition=attached_pic:stream_tags=filename,mimetype:format=duration", "-of", "json", source.path], timeout: 60)
+        let counts = try probeCounts(fromProbeJSON: json)
+        return (counts.video, counts.audio, counts.duration)
+    }
+
+    public struct ProbeCounts: Equatable, Sendable {
+        public let video: Int
+        public let audio: Int
+        public let duration: Double
+    }
+
+    /// Codecs that ffprobe reports as "video" but which are still images (MKV cover attachments, MP4 artwork).
+    static let imageCodecs: Set<String> = ["png", "mjpeg", "jpeg", "jpegls", "bmp", "gif", "webp", "tiff", "jpeg2000"]
+
+    /// Counts playable video and audio streams from ffprobe JSON. Cover art (attached_pic, image codecs,
+    /// image/* mimetype or a filename tag, as carried by Matroska attachments) is not playable video.
+    public static func probeCounts(fromProbeJSON json: String) throws -> ProbeCounts {
         struct Probe: Decodable {
-            struct Stream: Decodable { let codec_type: String? }
+            struct Stream: Decodable {
+                struct Disposition: Decodable { let attached_pic: Int? }
+                let codec_type: String?; let codec_name: String?
+                let disposition: Disposition?; let tags: [String: String]?
+            }
             struct Format: Decodable { let duration: String? }
             let streams: [Stream]; let format: Format?
         }
         let probe = try JSONDecoder().decode(Probe.self, from: Data(json.utf8))
-        return (probe.streams.filter { $0.codec_type == "video" }.count, probe.streams.filter { $0.codec_type == "audio" }.count, Double(probe.format?.duration ?? "") ?? 0)
+        let video = probe.streams.filter { stream in
+            guard stream.codec_type == "video" else { return false }
+            if stream.disposition?.attached_pic == 1 { return false }
+            if let codec = stream.codec_name?.lowercased(), imageCodecs.contains(codec) { return false }
+            let tags = Dictionary((stream.tags ?? [:]).map { ($0.key.lowercased(), $0.value) }, uniquingKeysWith: { a, _ in a })
+            if tags["mimetype"]?.lowercased().hasPrefix("image/") == true { return false }
+            if tags["filename"] != nil { return false }
+            return true
+        }.count
+        let audio = probe.streams.filter { $0.codec_type == "audio" }.count
+        return ProbeCounts(video: video, audio: audio, duration: Double(probe.format?.duration ?? "") ?? 0)
     }
 }
