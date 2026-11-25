@@ -6,8 +6,11 @@ public struct MetadataCandidate: Codable, Identifiable, Equatable, Sendable {
     public let title: String
     public let year: Int
     public let raw: String
-    public init(index: Int, title: String, year: Int, raw: String) {
-        self.index = index; self.title = title; self.year = year; self.raw = raw
+    /// Reformulated provider query that produced this candidate (nil = engine's filename terms).
+    /// fetch-and-set must repeat the same query, otherwise `index` designates another result.
+    public let searchTerms: String?
+    public init(index: Int, title: String, year: Int, raw: String, searchTerms: String? = nil) {
+        self.index = index; self.title = title; self.year = year; self.raw = raw; self.searchTerms = searchTerms
     }
 }
 
@@ -85,11 +88,29 @@ public actor SublerService {
         return document
     }
 
+    static func searchTermsClause(_ terms: String?) -> String {
+        guard let terms else { return "" }
+        return " search terms \(AppleScriptService.literal(terms))"
+    }
+
+    /// Engine's filename-derived search first. Only when it yields nothing, and only with the
+    /// embedded engine (the stock dictionary has no `search terms`), retry the bounded,
+    /// deterministic variants; candidates keep the query that produced them.
     public func candidates(document: SublerDocument) async throws -> [MetadataCandidate] {
-        guard sources[document] != nil else { throw AutomationServiceError.message("Document is not owned by this service.") }
+        guard let source = sources[document] else { throw AutomationServiceError.message("Document is not owned by this service.") }
+        let found = try await candidates(document: document, searchTerms: nil)
+        guard found.isEmpty, target.isBackground else { return found }
+        for variant in MetadataSearchVariants.variants(sourceName: source.lastPathComponent) {
+            let retried = try await candidates(document: document, searchTerms: variant)
+            if !retried.isEmpty { return retried }
+        }
+        return []
+    }
+
+    private func candidates(document: SublerDocument, searchTerms: String?) async throws -> [MetadataCandidate] {
         let result = try await AppleScriptService.run("""
         tell \(try target.applicationClause())
-            set resultsList to fetch metadata candidates \(try target.documentArgument(document, role: "into")) limit 50\(Self.languageClause(metadataLanguage))
+            set resultsList to fetch metadata candidates \(try target.documentArgument(document, role: "into")) limit 50\(Self.languageClause(metadataLanguage))\(Self.searchTermsClause(searchTerms))
             set resultText to ""
             repeat with resultLine in resultsList
                 set resultText to resultText & (resultLine as text) & linefeed
@@ -98,7 +119,9 @@ public actor SublerService {
         end tell
         """, timeout: 300)
         return result.components(separatedBy: "\n").enumerated().compactMap { offset, line in
-            MetadataMatching.parse(line, index: offset + 1)
+            MetadataMatching.parse(line, index: offset + 1).map {
+                MetadataCandidate(index: $0.index, title: $0.title, year: $0.year, raw: $0.raw, searchTerms: searchTerms)
+            }
         }
     }
 
@@ -168,7 +191,7 @@ public actor SublerService {
                 repeat with queueIndex from 1 to count of queue items
                     if status of queue item queueIndex is ready or status of queue item queueIndex is working then error "Subler contains a foreign ready or working queue item. Leave it untouched and retry when the queue is idle."
                 end repeat
-                \(try candidate.map { "fetch and set metadata candidate \($0.index) \(try target.documentArgument(document, role: "into"))\(Self.languageClause(metadataLanguage))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
+                \(try candidate.map { "fetch and set metadata candidate \($0.index) \(try target.documentArgument(document, role: "into"))\(Self.languageClause(metadataLanguage))\(Self.searchTermsClause($0.searchTerms))" } ?? "-- Manual identity is written to the generated MP4 after conversion.")
             end tell
             """, timeout: 300)
             // The native setter searches synchronously, then schedules its merge on the main queue.
@@ -278,14 +301,17 @@ public enum MetadataMatching {
         return words.joined(separator: " ")
     }
 
-    private static let descriptors: Set<String> = ["core", "multi", "vff", "vf2", "vfq", "vostfr", "truefrench", "french", "4klight", "web", "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "h264", "h265", "hevc", "hdr", "hdr10", "dv", "eac3", "ac3", "aac", "dts", "atmos", "10", "bits", "10bits"]
+    private static let descriptors: Set<String> = ["core", "multi", "vff", "vf2", "vfq", "vostfr", "truefrench", "french", "4klight", "web", "webrip", "webdl", "bluray", "bdrip", "remux", "x264", "x265", "h264", "h265", "hevc", "hdr", "hdr10", "hdlight", "dv", "eac3", "ac3", "aac", "dts", "atmos", "10", "bits", "10bits"]
 
     private static func isDescriptor(_ word: String) -> Bool {
         descriptors.contains(word) || word.range(of: "^[0-9]+[pi]$", options: .regularExpression) != nil
     }
 
-    public static func best(sourceName: String, candidates: [MetadataCandidate]) -> MetadataCandidate? {
-        let stem = (sourceName as NSString).deletingPathExtension
+    /// Same descriptor test for a raw (unnormalized) filename word.
+    static func isReleaseDescriptor(_ word: String) -> Bool { isDescriptor(normalized(word)) }
+
+    /// Explicit release year of a filename stem and its range, or nil.
+    static func explicitYear(in stem: String) -> (year: Int, range: Range<String.Index>)? {
         // Explicit year tokens only: 2160p / 2160i are resolutions, not years.
         guard let regex = try? NSRegularExpression(pattern: "(?i)(?<![a-z0-9])(?:18|19|20|21)[0-9]{2}(?![a-z0-9])") else { return nil }
         let years = regex.matches(in: stem, range: NSRange(stem.startIndex..., in: stem))
@@ -301,6 +327,19 @@ public enum MetadataMatching {
             range = next
         }
         guard let year = Int(stem[range]) else { return nil }
+        return (year, range)
+    }
+
+    /// A short (1–2 digit) number strictly inside a title, e.g. the sequel number a release adds
+    /// in « OSS 117 2 Rio ne repond plus ». First/last words are kept: « 9 mois ferme »,
+    /// « Ocean's 11 », « Saw 3 » carry their number legitimately.
+    static func isInnerSequelNumber(_ words: [String], at index: Int) -> Bool {
+        index > 0 && index < words.count - 1 && words[index].range(of: "^[0-9]{1,2}$", options: .regularExpression) != nil
+    }
+
+    public static func best(sourceName: String, candidates: [MetadataCandidate]) -> MetadataCandidate? {
+        let stem = (sourceName as NSString).deletingPathExtension
+        guard let (year, range) = explicitYear(in: stem) else { return nil }
         let prefix = String(stem[..<range.lowerBound])
         // A release can carry a localized title followed by its original title.
         // Match either explicit spelling, never a fuzzy substring or provider order.
@@ -325,6 +364,9 @@ public enum MetadataMatching {
         var tags = normalized(String(stem[range.upperBound...])).split(separator: " ").map(String.init)
         while let last = words.last, isDescriptor(last) { tags.append(words.removeLast()) }
         titles.insert(words.joined(separator: " "))
+        // A release-added sequel number inside the title (OSS 117 2 Rio…) is absent from the
+        // provider's title: also accept the spelling without it. Year + uniqueness still apply.
+        titles.insert(words.indices.filter { !isInnerSequelNumber(words, at: $0) }.map { words[$0] }.joined(separator: " "))
         titles.remove("")
         let matches = candidates.filter { $0.year == year && titles.contains(normalized($0.title)) }
         if !matches.isEmpty { return matches.count == 1 ? matches[0] : nil }

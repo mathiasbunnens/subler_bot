@@ -330,6 +330,11 @@ final class JobQueueService: ObservableObject {
                     try update(id) { $0.documentID = document.id; $0.status = .prettifying }
                     try update(id) { $0.status = .fetchingMetadata }
                     let found = value.manualMetadata == nil ? try await subler.candidates(document: document) : []
+                    if let terms = found.first?.searchTerms {
+                        store?.log("\(id): recherche de métadonnées reformulée « \(terms) » → \(found.count) candidat(s) (recherche par défaut : 0)")
+                    } else if value.manualMetadata == nil, found.isEmpty {
+                        store?.log("\(id): aucune métadonnée trouvée, variantes essayées : \(MetadataSearchVariants.variants(sourceName: source.lastPathComponent).map { "« \($0) »" }.joined(separator: ", "))")
+                    }
                     candidates[id] = found
                     let chosen: MetadataCandidate?
                     if let expected {

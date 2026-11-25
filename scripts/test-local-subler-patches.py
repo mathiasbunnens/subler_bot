@@ -18,14 +18,14 @@ for checkout, base, patch in [
         subprocess.run(['git', 'apply', '--check', diff], cwd=temp, check=True)
         subprocess.run(['git', 'apply', diff], cwd=temp, check=True)
         if patch == 'subler.patch':
-            for extra in ('graceful-quit', 'background-audio-conversion', 'background-subtitle-policy'):
+            for extra in ('graceful-quit', 'background-audio-conversion', 'background-subtitle-policy', 'background-metadata-search-terms'):
                 shutdown = root / f'patches/local-subler/{extra}.patch'
                 subprocess.run(['git', 'apply', '--check', shutdown], cwd=temp, check=True)
                 subprocess.run(['git', 'apply', shutdown], cwd=temp, check=True)
         texts = [diff.read_text()]
         if patch == 'subler.patch':
             texts += [(root / f'patches/local-subler/{extra}.patch').read_text()
-                      for extra in ('graceful-quit', 'background-audio-conversion', 'background-subtitle-policy')]
+                      for extra in ('graceful-quit', 'background-audio-conversion', 'background-subtitle-policy', 'background-metadata-search-terms')]
         files = sorted({line[6:] for text in texts for line in text.splitlines() if line.startswith('+++ b/')})
         assert files
         for name in files:

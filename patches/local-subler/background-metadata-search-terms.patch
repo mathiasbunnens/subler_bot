@@ -1,0 +1,58 @@
+diff --git a/Classes/ScriptCommand.swift b/Classes/ScriptCommand.swift
+index 996b15e..6ffda64 100644
+--- a/Classes/ScriptCommand.swift
++++ b/Classes/ScriptCommand.swift
+@@ -681,6 +681,15 @@ class SBMetadataResult: NSObject {
+     }
+ }
+ 
++/// Optional caller-supplied movie query (`search terms`) shared by `fetch metadata candidates`
++/// and `fetch and set metadata candidate`, so a reformulated search keeps the same result index.
++/// Absent or blank: nil, and the filename-derived terms are used unchanged.
++private func customSearchTerms(_ command: NSScriptCommand) -> MetadataSearchTerms? {
++    guard let raw = command.evaluatedArguments?["searchTerms"] as? String else { return nil }
++    let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
++    return query.isEmpty ? nil : .movie(title: query)
++}
++
+ @objc(SBFetchMetadataResultsScriptCommand)
+ class SBFetchMetadataResultsScriptCommand: NSScriptCommand, ScriptCommandDocumentTargeting {
+     
+@@ -693,7 +702,7 @@ class SBFetchMetadataResultsScriptCommand: NSScriptCommand, ScriptCommandDocumen
+ 
+         // Access the MP42File through the custom Document subclass
+         let mp4File = sublerDoc.mp4
+-        let searchTerms = mp4File.extractSearchTerms(fallbackURL: sublerDoc.fileURL)
++        let searchTerms = customSearchTerms(self) ?? mp4File.extractSearchTerms(fallbackURL: sublerDoc.fileURL)
+         
+         logger.write(toLog: "Starting metadata search for terms: \(searchTerms)")
+         
+@@ -884,7 +893,7 @@ class SBFetchAndSetMetadataResultScriptCommand: NSScriptCommand, ScriptCommandDo
+         
+         // Access the MP42File through the custom Document subclass
+         let mp4File = sublerDoc.mp4
+-        let searchTerms = mp4File.extractSearchTerms(fallbackURL: sublerDoc.fileURL)
++        let searchTerms = customSearchTerms(self) ?? mp4File.extractSearchTerms(fallbackURL: sublerDoc.fileURL)
+         
+         // Perform search and apply the nth result
+         searchMetadataAndSetResult(terms: searchTerms, resultIndex: resultIndex - 1, provider: provider, language: language) { success in
+diff --git a/Subler.sdef b/Subler.sdef
+index 2456d9d..c1caa5c 100644
+--- a/Subler.sdef
++++ b/Subler.sdef
+@@ -73,6 +73,7 @@
+             <parameter name="limit" code="limt" type="integer" optional="yes" description="Maximum number of results to return." />
+             <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
+             <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
++            <parameter name="search terms" code="sTrm" type="text" optional="yes" description="Movie search query to use instead of the terms derived from the file."><cocoa key="searchTerms" /></parameter>
+             <result description="The metadata results.">
+                 <type type="text" list="yes"/>
+             </result>
+@@ -87,6 +88,7 @@
+             <parameter name="owned token" code="bgtk" type="text" optional="yes"><cocoa key="ownedToken" /></parameter>
+             <parameter name="provider" code="prov" type="text" optional="yes" description="Metadata provider to use (Apple TV, TheMovieDB, TheTVDB, iTunes Store)." />
+             <parameter name="language" code="lang" type="text" optional="yes" description="Language for metadata search (e.g., 'en', 'es', 'fr')." />
++            <parameter name="search terms" code="sTrm" type="text" optional="yes" description="Movie search query to use instead of the terms derived from the file; must match the query used for the candidate index."><cocoa key="searchTerms" /></parameter>
+         </command>
+ 
+         <!-- Edit Commands -->
